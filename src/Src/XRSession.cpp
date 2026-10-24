@@ -8,6 +8,7 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 #include "XRSession.h"
+#include "MetaAsw.h"
 #include "SysInfo.h"
 #include "Watchdog.h"
 #include <cmath>
@@ -167,12 +168,28 @@ V vs(uint id : SV_VertexID)
 Texture2D tx : register(t0); SamplerState sm : register(s0);
 cbuffer C : register(b0) { float4 k; };   // x: brightness (the fade back in after a menu)
 float4 ps(V i) : SV_Target { return float4(tx.Sample(sm, i.uv).rgb * k.x, 1); }
+// The warp: the image was rendered in a frame turned from the eye's (a stereo eye turned to its frustum's centre, a mono
+// image on canted displays). Each eye pixel is a direction in the eye's frame (its native fov, linear in tan), taken into
+// the render frame by the rows r0..r2 and looked up in the image at its own tans; what it does not cover is black.
+cbuffer W : register(b1) { float4 kw; float4 dstT; float4 srcT; float4 r0; float4 r1; float4 r2; };   // tans: L R U D
+float4 psw(V i) : SV_Target
+{
+    const float3 e = float3(lerp(dstT.x, dstT.y, i.uv.x), lerp(dstT.z, dstT.w, i.uv.y), -1);
+    const float3 d = float3(dot(r0.xyz, e), dot(r1.xyz, e), dot(r2.xyz, e));
+    if (d.z > -1e-4) return float4(0, 0, 0, 1);
+    const float2 s = d.xy / -d.z;
+    const float2 uv = float2((s.x - srcT.x) / (srcT.y - srcT.x), (srcT.z - s.y) / (srcT.z - srcT.w));
+    if (any(uv < 0) || any(uv > 1)) return float4(0, 0, 0, 1);
+    return float4(tx.SampleLevel(sm, uv, 0).rgb * kw.x, 1);
+}
 )";
 struct Blitter
 {
     bool failed = false, ready = false;
     ID3D11VertexShader* vs = nullptr; ID3D11PixelShader* ps = nullptr; ID3D11SamplerState* smp = nullptr;
     ID3D11RasterizerState* rs = nullptr; ID3D11Buffer* cb = nullptr; float cbScale = -1.f;
+    ID3D11PixelShader* psw = nullptr; ID3D11Buffer* cbw = nullptr;   // the warp (psw)
+    unsigned long long warps = 0;
     ID3DDeviceContextState* state = nullptr;
     ID3D11Texture2D* src = nullptr; ID3D11ShaderResourceView* srv = nullptr;
     UINT w = 0, h = 0; DXGI_FORMAT fmt = DXGI_FORMAT_UNKNOWN;
@@ -186,17 +203,19 @@ struct Blitter
         using CompileFn = HRESULT(WINAPI*)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*, LPCSTR, LPCSTR, UINT, UINT, ID3DBlob**, ID3DBlob**);
         auto compile = dc ? (CompileFn)GetProcAddress(dc, "D3DCompile") : nullptr;
         if (!compile) { LOGI("XRSession: blit: d3dcompiler_47 not available"); return false; }
-        ID3DBlob *bv = nullptr, *bp = nullptr, *err = nullptr;
+        ID3DBlob *bv = nullptr, *bp = nullptr, *bw = nullptr, *err = nullptr;
         if (FAILED(compile(kBlitHlsl, strlen(kBlitHlsl), "blit", nullptr, nullptr, "vs", "vs_5_0", 0, 0, &bv, &err)) ||
-            FAILED(compile(kBlitHlsl, strlen(kBlitHlsl), "blit", nullptr, nullptr, "ps", "ps_5_0", 0, 0, &bp, &err)))
+            FAILED(compile(kBlitHlsl, strlen(kBlitHlsl), "blit", nullptr, nullptr, "ps", "ps_5_0", 0, 0, &bp, &err)) ||
+            FAILED(compile(kBlitHlsl, strlen(kBlitHlsl), "blit", nullptr, nullptr, "psw", "ps_5_0", 0, 0, &bw, &err)))
         {
             LOGI("XRSession: blit shader compile failed: {}", err ? (const char*)err->GetBufferPointer() : "?");
-            if (err) err->Release(); if (bv) bv->Release(); if (bp) bp->Release();
+            if (err) err->Release(); if (bv) bv->Release(); if (bp) bp->Release(); if (bw) bw->Release();
             return false;
         }
         dev->CreateVertexShader(bv->GetBufferPointer(), bv->GetBufferSize(), nullptr, &vs);
         dev->CreatePixelShader(bp->GetBufferPointer(), bp->GetBufferSize(), nullptr, &ps);
-        bv->Release(); bp->Release();
+        dev->CreatePixelShader(bw->GetBufferPointer(), bw->GetBufferSize(), nullptr, &psw);
+        bv->Release(); bp->Release(); bw->Release();
         D3D11_SAMPLER_DESC sd = {};
         sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -206,6 +225,7 @@ struct Blitter
         dev->CreateRasterizerState(&rd, &rs);
         D3D11_BUFFER_DESC bd = {}; bd.ByteWidth = 16; bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         dev->CreateBuffer(&bd, nullptr, &cb);
+        bd.ByteWidth = 6 * 16; dev->CreateBuffer(&bd, nullptr, &cbw);
         ID3D11Device1* d1 = nullptr;
         if (SUCCEEDED(dev->QueryInterface(__uuidof(ID3D11Device1), (void**)&d1)) && d1)
         {
@@ -213,7 +233,7 @@ struct Blitter
             d1->CreateDeviceContextState(0, &fl, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device1), nullptr, &state);
             d1->Release();
         }
-        if (!vs || !ps || !smp || !rs || !cb || !state) { LOGI("XRSession: blit: resource creation failed (state {})", (void*)state); return false; }
+        if (!vs || !ps || !psw || !smp || !rs || !cb || !cbw || !state) { LOGI("XRSession: blit: resource creation failed (state {})", (void*)state); return false; }
         failed = false; ready = true;
         LOGI("XRSession: orthoscopic blit ready");
         return true;
@@ -302,10 +322,49 @@ struct Blitter
         draws++;
         return true;
     }
+    //! Draw `view` over the WHOLE of `dst`, warped: dst is an eye's native fov (dstT: tans L R U D), the view an image
+    //! rendered at srcT in a frame turned from the eye's; `m` (3x3, rows) takes an eye direction into that frame.
+    bool DrawWarp(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* view, ID3D11Texture2D* dst, const float dstT[4],
+                  const float srcT[4], const float m[9], DXGI_FORMAT swapFmt, float scale)
+    {
+        if (!Init(dev) || !view) return false;
+        ID3D11RenderTargetView* rtv = nullptr;
+        D3D11_TEXTURE2D_DESC dd = {}; dst->GetDesc(&dd);
+        {
+            D3D11_RENDER_TARGET_VIEW_DESC rd = {}; rd.Format = ViewFormat(dd.Format, swapFmt); rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+            const HRESULT hr = dev->CreateRenderTargetView(dst, &rd, &rtv);
+            if (FAILED(hr) || !rtv) return Fail("render target view (warp)", hr);
+        }
+        ID3D11DeviceContext1* c1 = nullptr;
+        { const HRESULT hr = ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1); if (FAILED(hr) || !c1) { rtv->Release(); return Fail("context1", hr); } }
+        ID3DDeviceContextState* prev = nullptr;
+        c1->SwapDeviceContextState(state, &prev);
+        const float k[24] = { scale, 0, 0, 0, dstT[0], dstT[1], dstT[2], dstT[3], srcT[0], srcT[1], srcT[2], srcT[3],
+                              m[0], m[1], m[2], 0, m[3], m[4], m[5], 0, m[6], m[7], m[8], 0 };
+        c1->UpdateSubresource(cbw, 0, nullptr, k, 0, 0);
+        c1->OMSetRenderTargets(1, &rtv, nullptr);
+        D3D11_VIEWPORT vp = { 0.f, 0.f, (float)dd.Width, (float)dd.Height, 0.f, 1.f };
+        c1->RSSetViewports(1, &vp);
+        c1->RSSetState(rs);
+        c1->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        c1->VSSetShader(vs, nullptr, 0);
+        c1->PSSetShader(psw, nullptr, 0);
+        c1->PSSetShaderResources(0, 1, &view);
+        c1->PSSetSamplers(0, 1, &smp);
+        c1->PSSetConstantBuffers(1, 1, &cbw);
+        c1->Draw(3, 0);
+        ID3D11ShaderResourceView* none = nullptr; c1->PSSetShaderResources(0, 1, &none);
+        c1->OMSetRenderTargets(0, nullptr, nullptr);
+        c1->SwapDeviceContextState(prev, nullptr);
+        if (prev) prev->Release();
+        c1->Release(); rtv->Release();
+        draws++; warps++;
+        return true;
+    }
     void Release()
     {
-        for (IUnknown* u : std::initializer_list<IUnknown*>{ vs, ps, smp, rs, cb, state, srv, src }) if (u) u->Release();
-        vs = nullptr; ps = nullptr; smp = nullptr; rs = nullptr; cb = nullptr; state = nullptr; srv = nullptr; src = nullptr; ready = false;
+        for (IUnknown* u : std::initializer_list<IUnknown*>{ vs, ps, psw, smp, rs, cb, cbw, state, srv, src }) if (u) u->Release();
+        vs = nullptr; ps = nullptr; psw = nullptr; smp = nullptr; rs = nullptr; cb = nullptr; cbw = nullptr; state = nullptr; srv = nullptr; src = nullptr; ready = false;
         cbScale = -1.f; failed = false;
     }
 } g_Blit;
@@ -537,8 +596,15 @@ float4 ps(V i) : SV_Target
 )";
 Pass g_BackdropR;
 // the frozen-backdrop ring's textures (XRSession::OfferSnapshot)
-ID3D11Texture2D* g_SnapTex[3] = {}; ID3D11ShaderResourceView* g_SnapSrv[3] = {}; UINT g_SnapW = 0, g_SnapH = 0; DXGI_FORMAT g_SnapFmt = DXGI_FORMAT_UNKNOWN;
-void ReleaseSnaps() { for (int i = 0; i < 3; i++) { if (g_SnapSrv[i]) g_SnapSrv[i]->Release(); if (g_SnapTex[i]) g_SnapTex[i]->Release(); g_SnapSrv[i] = nullptr; g_SnapTex[i] = nullptr; } g_SnapW = g_SnapH = 0; }
+// [slot][eye]: a stereo pair keeps BOTH eyes' pictures (each eye's turned frustum covers its own outer edge); a mono
+// picture only [slot][0]
+ID3D11Texture2D* g_SnapTex[3][2] = {}; ID3D11ShaderResourceView* g_SnapSrv[3][2] = {}; UINT g_SnapW = 0, g_SnapH = 0; DXGI_FORMAT g_SnapFmt = DXGI_FORMAT_UNKNOWN;
+void ReleaseSnaps()
+{
+    for (int i = 0; i < 3; i++) for (int e = 0; e < 2; e++)
+    { if (g_SnapSrv[i][e]) g_SnapSrv[i][e]->Release(); if (g_SnapTex[i][e]) g_SnapTex[i][e]->Release(); g_SnapSrv[i][e] = nullptr; g_SnapTex[i][e] = nullptr; }
+    g_SnapW = g_SnapH = 0;
+}
 long long Qpc() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
 double QpcSec(long long d) { static LARGE_INTEGER f{}; if (!f.QuadPart) QueryPerformanceFrequency(&f); return (double)d / (double)f.QuadPart; }
 
@@ -1165,6 +1231,94 @@ void XRSession::SyncInput()
     }
 }
 
+void XRSession::LocateHead(long long time, const XREyePose eyes[2], XREyePose& head)
+{
+    const XREyePose& a = eyes[0]; const XREyePose& b = eyes[m_ViewCount > 1 ? 1 : 0];
+    head = a; head.fovLeft = head.fovRight = head.fovUp = head.fovDown = 0.f;
+    head.posX = (a.posX + b.posX) * 0.5f; head.posY = (a.posY + b.posY) * 0.5f; head.posZ = (a.posZ + b.posZ) * 0.5f;
+    // the eyes' average (nlerp; the two are at most a few tens of degrees apart): the fallback
+    float s = a.quatX * b.quatX + a.quatY * b.quatY + a.quatZ * b.quatZ + a.quatW * b.quatW;
+    const float k = s < 0.f ? -1.f : 1.f;
+    float q[4] = { a.quatX + k * b.quatX, a.quatY + k * b.quatY, a.quatZ + k * b.quatZ, a.quatW + k * b.quatW };
+    float n = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    if (n > 1e-6f) { head.quatX = q[0] / n; head.quatY = q[1] / n; head.quatZ = q[2] / n; head.quatW = q[3] / n; }
+    bool fromView = false;
+    if (g.viewSpace && time > 0)
+    {
+        XrSpaceLocation loc = { XR_TYPE_SPACE_LOCATION };
+        constexpr XrSpaceLocationFlags kOri = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+        if (XR_SUCCEEDED(xrLocateSpace(g.viewSpace, g.space, (XrTime)time, &loc)) && (loc.locationFlags & kOri))
+        {   // plausible: within 45 deg of the eyes' average, and its origin within 10 cm of their midpoint (the spec puts it
+            // between the eyes; a runtime that gives something else is not trusted with the head)
+            const XrQuaternionf& v = loc.pose.orientation;
+            const float d = fabsf(v.x * head.quatX + v.y * head.quatY + v.z * head.quatZ + v.w * head.quatW);
+            const float dx = loc.pose.position.x - head.posX, dy = loc.pose.position.y - head.posY, dz = loc.pose.position.z - head.posZ;
+            const bool posOk = !(loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) || dx * dx + dy * dy + dz * dz < 0.01f;
+            if (d > 0.92f && posOk) { head.quatX = v.x; head.quatY = v.y; head.quatZ = v.z; head.quatW = v.w; fromView = true; }
+        }
+    }
+    if (fromView) m_HeadFromView++; else m_HeadAveraged++;
+}
+
+float XRSession::EyeCant(int i) const
+{
+    if (i < 0 || i >= m_ViewCount || !m_Eyes[i].valid) return 0.f;
+    const XREyePose& e = m_Eyes[i]; const XREyePose& h = m_Head;
+    const float d = fabsf(e.quatX * h.quatX + e.quatY * h.quatY + e.quatZ * h.quatZ + e.quatW * h.quatW);
+    return 2.f * acosf(d > 1.f ? 1.f : d) * 57.29578f;
+}
+
+bool XRSession::LocateAt(long long time, XREyePose eyes[2], XRHandPose hands[2], XREyePose* head)
+{
+    if (!m_Initialized || !m_SessionRunning || !g.session || !g.space || m_ViewCount != 2 || time <= 0) return false;
+    {   // a recenter that takes effect by then: the poses would be in the new space with the old generation
+        std::lock_guard<std::mutex> lk(pump.m);
+        if (m_RecenterPending && time >= m_RecenterAt) return false;
+    }
+    XrViewLocateInfo vli = { XR_TYPE_VIEW_LOCATE_INFO };
+    vli.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    vli.displayTime = (XrTime)time;
+    vli.space = g.space;
+    XrViewState vs = { XR_TYPE_VIEW_STATE };
+    XrView views[kMaxEyes] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };
+    uint32_t got = 0;
+    XrResult r;
+    { Watchdog::Mark mk("xrLocateViews (ahead)"); r = xrLocateViews(g.session, &vli, &vs, kMaxEyes, &got, views); }
+    constexpr XrViewStateFlags kViewBoth = XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT;
+    if (XR_FAILED(r) || got < 2 || (vs.viewStateFlags & kViewBoth) != kViewBoth) return false;
+    for (int i = 0; i < 2; i++)
+    {
+        XREyePose& e = eyes[i]; e = m_Eyes[i];   // (fov from the frame)
+        e.posX = views[i].pose.position.x; e.posY = views[i].pose.position.y; e.posZ = views[i].pose.position.z;
+        e.quatX = views[i].pose.orientation.x; e.quatY = views[i].pose.orientation.y;
+        e.quatZ = views[i].pose.orientation.z; e.quatW = views[i].pose.orientation.w;
+        e.valid = true; e.held = false;
+    }
+    if (head) LocateHead(time, eyes, *head);
+    for (int i = 0; i < 2; i++)
+    {
+        hands[i] = m_Input.hand[i];   // a hand that is not tracked keeps what SyncInput holds for it
+        if (!m_InputReady || !g.aimSpace[i] || m_Input.hand[i].held) continue;
+        XrSpaceLocation loc = { XR_TYPE_SPACE_LOCATION };
+        constexpr XrSpaceLocationFlags kBoth = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+        if (XR_FAILED(xrLocateSpace(g.aimSpace[i], g.space, (XrTime)time, &loc)) || (loc.locationFlags & kBoth) != kBoth) continue;
+        if (m_PitchOffset != 0.f)
+        {   // as SyncInput
+            const float h = m_PitchOffset * 0.5f * 3.14159265f / 180.f, sx = sinf(h), cw = cosf(h);
+            const XrQuaternionf q = loc.pose.orientation;
+            loc.pose.orientation = { q.w * sx + q.x * cw, q.y * cw + q.z * sx, q.z * cw - q.y * sx, q.w * cw - q.x * sx };
+        }
+        XRHandPose& h = hands[i];
+        h.posX = loc.pose.position.x; h.posY = loc.pose.position.y; h.posZ = loc.pose.position.z;
+        h.quatX = loc.pose.orientation.x; h.quatY = loc.pose.orientation.y; h.quatZ = loc.pose.orientation.z; h.quatW = loc.pose.orientation.w;
+        h.valid = true; h.held = false;
+    }
+    m_LocatesAhead++;
+    return true;
+}
+long long XRSession::FrameDisplayTime() const { return (long long)g.frameState.predictedDisplayTime; }
+long long XRSession::FramePeriod() const { return (long long)g.frameState.predictedDisplayPeriod; }
+
 bool XRSession::WristPose(int space, float q[4], float p[3]) const
 {
     const int s = space ? 1 : 0;
@@ -1241,6 +1395,7 @@ void XRSession::PollEventsNow()
             m_SessionState = ssc->state;
             Watchdog::SetXrState((int)ssc->state);
             LOGI("XRSession: state -> {}", StateName(ssc->state));
+            if (ssc->state == XR_SESSION_STATE_FOCUSED) MetaAsw::OnFocused(m_RuntimeName);   // Meta's ASW off for this game
             {   // the runtime taking a running session away and not offering it back: see PumpLoop (the new session)
                 std::lock_guard<std::mutex> lk(pump.m);
                 if (ssc->state == XR_SESSION_STATE_FOCUSED || ssc->state == XR_SESSION_STATE_VISIBLE) pump.wasRunning = true;
@@ -1396,6 +1551,7 @@ bool XRSession::BeginFrame()
         e.fovDown = g.views[i].fov.angleDown;
         e.valid = (vs.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) != 0;
     }
+    LocateHead((long long)g.frameState.predictedDisplayTime, m_Eyes, m_Head);
     if (!m_FovLogged && got > 0)
     {
         m_FovLogged = true;
@@ -1404,6 +1560,8 @@ bool XRSession::BeginFrame()
             LOGI("XRSession: eye {} native fov deg L={} R={} U={} D={}", i,
                 g.views[i].fov.angleLeft * r2d, g.views[i].fov.angleRight * r2d,
                 g.views[i].fov.angleUp * r2d, g.views[i].fov.angleDown * r2d);
+        LOGI("XRSession: eyes turned from the head by {:.2f} / {:.2f} deg (canted displays if not 0), head orientation from {}", EyeCant(0),
+             EyeCant(m_ViewCount > 1 ? 1 : 0), m_HeadFromView ? "the VIEW space" : "the eyes' average");
     }
     return true;
 }
@@ -1498,6 +1656,7 @@ void XRSession::SubmitFrame(ID3D11Texture2D* source, int onlyEye)
             // fraction cx,cy of the texture, so each side needs sw/2 of room).
             unsigned srcX = 0, srcY = 0, cropW = 0, cropH = 0;
             bool cropped = false;
+            float ox = 0, oy = 0, ow = 0, oh = 0; bool orthoRect = false;   // the ortho placement (EyeRect)
             if (source)
             {
                 D3D11_TEXTURE2D_DESC sd = {};
@@ -1509,7 +1668,9 @@ void XRSession::SubmitFrame(ID3D11Texture2D* source, int onlyEye)
                     if (cropped) { needW = cropW; needH = cropH; }
                 }
                 else if (OrthoReady())
-                {   // drawn scaled: the runtime's recommended size is all the eye can show
+                {   // drawn scaled: the runtime's recommended size is all the eye can show (a declared fov: that density
+                    // over the image's own frustum)
+                    orthoRect = EyeRect(i, m_SrcTan, m_Declare, ox, oy, ow, oh);
                     needW = m_EyeWidth; needH = m_EyeHeight;
                 }
                 else
@@ -1544,25 +1705,15 @@ void XRSession::SubmitFrame(ID3D11Texture2D* source, int onlyEye)
                 // covers there (~68° for 1080px) — smaller, but fused.
                 ID3D11Texture2D* dst = g.images[i][imgIndex].texture;
                 bool drawn = false;
-                if (source && dst && g.context && g.device && !m_MatchedFov && OrthoReady())
-                {   // the source's tan rect inside the eye's native fov (both linear in tan), in swapchain pixels
-                    D3D11_TEXTURE2D_DESC dd = {}; dst->GetDesc(&dd);
-                    const XrFovf& fv = g.views[i].fov;
-                    const float tL = tanf(fv.angleLeft), tR = tanf(fv.angleRight), tU = tanf(fv.angleUp), tD = tanf(fv.angleDown);
-                    const float x0 = (m_SrcTan[0] - tL) / (tR - tL) * dd.Width, x1 = (m_SrcTan[1] - tL) / (tR - tL) * dd.Width;
-                    const float y0 = (tU - m_SrcTan[2]) / (tU - tD) * dd.Height, y1 = (tU - m_SrcTan[3]) / (tU - tD) * dd.Height;
-                    if (g_Blit.Draw(g.device, g.context, source, dst, x0, y0, x1 - x0, y1 - y0, (DXGI_FORMAT)m_SwapFormat, fade))
+                if (source && dst && g.context && g.device && !m_MatchedFov && OrthoReady() && orthoRect)
+                {   // the source's tan rect inside the eye's native fov (both linear in tan), in swapchain pixels -- or, a
+                    // declared fov, the whole image (EyeRect); warped when its frame is turned from the eye's
+                    const XrPosef& rp = g.views[i].pose;
+                    float pose[7] = { rp.orientation.x, rp.orientation.y, rp.orientation.z, rp.orientation.w, rp.position.x, rp.position.y, rp.position.z };
+                    if (m_RenderPoseValid) for (int k = 0; k < 7; k++) pose[k] = m_RenderPose[k];   // what it was really rendered from
+                    if (DrawInto(i, source, nullptr, dst, m_SrcTan, m_SrcWarp[i], m_Declare, fade, pose))
                     {
-                        drawn = true;
-                        m_LastEyeTex[i] = dst;
-                        m_ContentX[i] = (int)lroundf(x0); m_ContentY[i] = (int)lroundf(y0);
-                        m_ContentW[i] = (int)lroundf(x1 - x0); m_ContentH[i] = (int)lroundf(y1 - y0);
-                        const XrPosef& rp = g.views[i].pose;
-                        m_EyeRenderPose[i][0] = rp.orientation.x; m_EyeRenderPose[i][1] = rp.orientation.y;
-                        m_EyeRenderPose[i][2] = rp.orientation.z; m_EyeRenderPose[i][3] = rp.orientation.w;
-                        m_EyeRenderPose[i][4] = rp.position.x; m_EyeRenderPose[i][5] = rp.position.y; m_EyeRenderPose[i][6] = rp.position.z;
-                        if (m_RenderPoseValid) for (int k = 0; k < 7; k++) m_EyeRenderPose[i][k] = m_RenderPose[k];   // what it was really rendered from
-                        m_EyePoseValid[i] = true;
+                        drawn = true;   // (DrawInto recorded the content rect and the pose the layer claims)
                     }
                 }
                 if (!drawn && source && dst && g.context && g.device)
@@ -1602,7 +1753,7 @@ void XRSession::SubmitFrame(ID3D11Texture2D* source, int onlyEye)
 
                     D3D11_BOX box = { srcX, srcY, 0, srcX + w, srcY + h, 1 };
                     g.context->CopySubresourceRegion(dst, 0, dx, dy, 0, source, 0, &box);
-                    m_LastEyeTex[i] = dst;
+                    m_LastEyeTex[i] = dst; m_EyeDecl[i] = false;
                     m_ContentX[i] = (int)dx; m_ContentY[i] = (int)dy;
                     m_ContentW[i] = (int)w;  m_ContentH[i] = (int)h;
                     // This image was rendered with THIS frame's view pose —
@@ -1636,38 +1787,20 @@ void XRSession::SubmitFrame(ID3D11Texture2D* source, int onlyEye)
         //   (above) puts it on each eye's optical axis.
         // - Matched-fov stereo: the content rect was RENDERED with this fov,
         //   so it maps across the eye's whole fov (compositor scales).
-        projViews[i] = { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW };
         // Each eye under the pose its IMAGE was rendered with (fresh eye:
         // cached just above = this frame's; stale alternating eye: the pose
         // from its own render frame). The compositor timewarps the difference
         // to display time. Submitting the stale image under the CURRENT pose
         // hid exactly one frame of head motion from the compositor — seen as
         // constant one-eye jitter during head turns (Quest 3 user report).
-        if (m_EyePoseValid[i])
-        {
-            projViews[i].pose.orientation = { m_EyeRenderPose[i][0], m_EyeRenderPose[i][1],
-                                              m_EyeRenderPose[i][2], m_EyeRenderPose[i][3] };
-            projViews[i].pose.position = { m_EyeRenderPose[i][4], m_EyeRenderPose[i][5],
-                                           m_EyeRenderPose[i][6] };
-        }
-        else
-        {
-            projViews[i].pose = g.views[i].pose;
-        }
-        projViews[i].fov = g.views[i].fov;
-        projViews[i].subImage.swapchain = g.swapchains[i];
-        projViews[i].subImage.imageArrayIndex = 0;
+        // Mono placement maps the WHOLE texture across the native fov, so the extent is the actual (possibly regrown)
+        // swapchain size; a declared fov maps exactly the image's pixels (FillEyeView).
+        FillEyeView(i, projViews[i]);
         if (m_MatchedFov && m_ContentW[i] > 0)
         {
+            projViews[i].fov = g.views[i].fov;
             projViews[i].subImage.imageRect.offset = { 0, 0 };
             projViews[i].subImage.imageRect.extent = { m_ContentW[i], m_ContentH[i] };
-        }
-        else
-        {
-            // Mono placement maps the WHOLE texture across the native fov, so
-            // the extent must be the actual (possibly regrown) swapchain size.
-            projViews[i].subImage.imageRect.offset = { 0, 0 };
-            projViews[i].subImage.imageRect.extent = { (int)m_SwapW[i], (int)m_SwapH[i] };
         }
     }
 
@@ -1685,17 +1818,19 @@ void XRSession::SubmitFrame(ID3D11Texture2D* source, int onlyEye)
             mid.orientation = { m_RenderPose[0], m_RenderPose[1], m_RenderPose[2], m_RenderPose[3] };
             mid.position = { m_RenderPose[4], m_RenderPose[5], m_RenderPose[6] };
         }
-        projViews[0].pose = mid;
-        projViews[1].pose = mid;
+        // (an eye whose image was warped from a turned frame -- canted displays -- is claimed at its own orientation,
+        // which DrawInto set: the render pose turned back by the warp)
+        for (int i = 0; i < 2; i++)
+            if (m_EyeDecl[i] || !(fabsf(m_SrcWarp[i][3]) < 0.9999999f)) projViews[i].pose = mid;
     }
     m_RenderPoseValid = false;
+    for (int i = 0; i < kMaxEyes; i++) { m_SrcWarp[i][0] = m_SrcWarp[i][1] = m_SrcWarp[i][2] = 0.f; m_SrcWarp[i][3] = 1.f; }
     // a picture of the game for the menu screen's backdrop: the pose it is claimed at is where it was seen
     if (source && OrthoReady() && !m_MatchedFov)
     {
         const int e = onlyEye >= 0 && onlyEye < m_ViewCount ? onlyEye : 0;
-        const XrQuaternionf& q = projViews[e].pose.orientation;
-        const float quat[4] = { q.x, q.y, q.z, q.w };
-        OfferSnapshot(source, quat);
+        // (the frame the picture was RENDERED in, which its tans are in: a warped eye is claimed at another orientation)
+        OfferSnapshot(source, m_EyeImgQuat[e]);
     }
 
     XrCompositionLayerProjection layer = { XR_TYPE_COMPOSITION_LAYER_PROJECTION };
@@ -1704,6 +1839,188 @@ void XRSession::SubmitFrame(ID3D11Texture2D* source, int onlyEye)
     layer.views = projViews;
 
     EndFrameWithLayers(layer);
+}
+
+bool XRSession::StagePairLeft(ID3D11Texture2D* source, const float quat[4], const float pos[3], unsigned long long pair, const float* tan, const float* warp)
+{
+    m_PairStaged = false;
+    memcpy(m_PairTan, tan ? tan : m_SrcTan, 16);
+    if (warp) memcpy(m_PairWarp, warp, 16); else { m_PairWarp[0] = m_PairWarp[1] = m_PairWarp[2] = 0.f; m_PairWarp[3] = 1.f; }
+    if (!source || !g.device || !g.context) return false;
+    D3D11_TEXTURE2D_DESC sd = {}; source->GetDesc(&sd);
+    if (!m_PairTex || sd.Width != m_PairW || sd.Height != m_PairH || (int)sd.Format != m_PairFmt)
+    {
+        if (m_PairSrv) { m_PairSrv->Release(); m_PairSrv = nullptr; } if (m_PairTex) { m_PairTex->Release(); m_PairTex = nullptr; }
+        D3D11_TEXTURE2D_DESC cd = sd; cd.MipLevels = 1; cd.ArraySize = 1; cd.SampleDesc = { 1, 0 };
+        cd.Usage = D3D11_USAGE_DEFAULT; cd.BindFlags = D3D11_BIND_SHADER_RESOURCE; cd.CPUAccessFlags = 0; cd.MiscFlags = 0;
+        D3D11_SHADER_RESOURCE_VIEW_DESC vd = {}; vd.Format = Blitter::ViewFormat(sd.Format, DXGI_FORMAT_UNKNOWN);
+        vd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; vd.Texture2D.MipLevels = 1;
+        if (FAILED(g.device->CreateTexture2D(&cd, nullptr, &m_PairTex)) || FAILED(g.device->CreateShaderResourceView(m_PairTex, &vd, &m_PairSrv)))
+        {
+            LOGI("XRSession: the pair's left copy {}x{} fmt {} could not be created", sd.Width, sd.Height, (int)sd.Format);
+            if (m_PairTex) { m_PairTex->Release(); m_PairTex = nullptr; }
+            return false;
+        }
+        m_PairW = sd.Width; m_PairH = sd.Height; m_PairFmt = (int)sd.Format;
+    }
+    g.context->CopyResource(m_PairTex, source);
+    for (int k = 0; k < 4; k++) m_PairPose[k] = quat[k];
+    for (int k = 0; k < 3; k++) m_PairPose[4 + k] = pos[k];
+    m_PairId = pair; m_PairStaged = true;
+    return true;
+}
+
+//! One eye of a synchronised pair: the image (a texture to copy, or a shader-readable view) drawn at its true angles
+//! into the eye's swapchain, claimed at the pose it was rendered from.
+bool XRSession::EyeRect(int i, const float tan[4], bool declare, float& x, float& y, float& w, float& h)
+{
+    const XrFovf& fv = g.views[i].fov;
+    const float tL = tanf(fv.angleLeft), tR = tanf(fv.angleRight), tU = tanf(fv.angleUp), tD = tanf(fv.angleDown);
+    if (!(tR > tL) || !(tU > tD) || !(tan[1] > tan[0]) || !(tan[2] > tan[3])) return false;
+    if (declare)
+    {   // the whole image, at the eye's own pixel density (the runtime's recommended size over its native fov)
+        const float kx = (float)m_EyeWidth / (tR - tL), ky = (float)m_EyeHeight / (tU - tD);
+        const uint32_t nw = (uint32_t)std::min(4096.f, ceilf(kx * (tan[1] - tan[0]))), nh = (uint32_t)std::min(4096.f, ceilf(ky * (tan[2] - tan[3])));
+        EnsureEyeSwapchain(i, nw, nh);
+        x = 0.f; y = 0.f; w = (float)std::min(nw, m_SwapW[i]); h = (float)std::min(nh, m_SwapH[i]);
+        return w > 0.f && h > 0.f;
+    }
+    EnsureEyeSwapchain(i, m_EyeWidth, m_EyeHeight);
+    // the source's tan rect inside the eye's native fov (both linear in tan), in swapchain pixels
+    const float W = (float)m_SwapW[i], H = (float)m_SwapH[i];
+    const float x0 = (tan[0] - tL) / (tR - tL) * W, x1 = (tan[1] - tL) / (tR - tL) * W;
+    const float y0 = (tU - tan[2]) / (tU - tD) * H, y1 = (tU - tan[3]) / (tU - tD) * H;
+    x = x0; y = y0; w = x1 - x0; h = y1 - y0;
+    return W > 0.f && H > 0.f;
+}
+
+void XRSession::FillEyeView(int i, XrCompositionLayerProjectionView& pv) const
+{
+    pv = { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW };
+    const float* p = m_EyePoseValid[i] ? m_EyeRenderPose[i] : nullptr;
+    if (p) { pv.pose.orientation = { p[0], p[1], p[2], p[3] }; pv.pose.position = { p[4], p[5], p[6] }; }
+    else pv.pose = g.views[i].pose;
+    pv.subImage.swapchain = g.swapchains[i];
+    pv.subImage.imageArrayIndex = 0;
+    pv.subImage.imageRect.offset = { 0, 0 };
+    if (m_EyeDecl[i] && m_ContentW[i] > 0 && m_ContentH[i] > 0)
+    {   // the fov the image was rendered with, and exactly the pixels it fills
+        const float* t = m_EyeDeclTan[i];
+        pv.fov = { atanf(t[0]), atanf(t[1]), atanf(t[2]), atanf(t[3]) };
+        pv.subImage.imageRect.extent = { m_ContentW[i], m_ContentH[i] };
+    }
+    else
+    {
+        pv.fov = g.views[i].fov;
+        pv.subImage.imageRect.extent = { (int)m_SwapW[i], (int)m_SwapH[i] };
+    }
+}
+
+bool XRSession::DrawInto(int i, ID3D11Texture2D* source, ID3D11ShaderResourceView* srv, ID3D11Texture2D* dst, const float tan[4], const float* warp,
+                         bool declare, float fade, const float pose[7])
+{
+    float x0 = 0, y0 = 0, rw = 0, rh = 0;
+    if (!dst || !EyeRect(i, tan, declare, x0, y0, rw, rh)) return false;
+    const bool turned = !declare && warp && fabsf(warp[3]) < 0.9999999f;
+    float claim[7]; memcpy(claim, pose, 28);
+    bool drawn = false;
+    if (turned)
+    {   // the eye's native fov, each of its pixels looked up in the turned image (Blitter::DrawWarp)
+        ID3D11ShaderResourceView* v = srv;
+        if (!v && g_Blit.Copy(g.device, g.context, source)) v = g_Blit.srv;
+        const XrFovf& fv = g.views[i].fov;
+        const float dstT[4] = { tanf(fv.angleLeft), tanf(fv.angleRight), tanf(fv.angleUp), tanf(fv.angleDown) };
+        const float x = -warp[0], y = -warp[1], z = -warp[2], w = warp[3];   // conj(warp): eye -> render frame
+        const float m[9] = { 1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
+                             2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
+                             2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y) };
+        drawn = v && g_Blit.DrawWarp(g.device, g.context, v, dst, dstT, tan, m, (DXGI_FORMAT)m_SwapFormat, fade);
+        if (drawn)
+        {   // claimed at the eye's orientation when it was rendered: render * conj(warp)
+            const float* q = pose; const float c[4] = { -warp[0], -warp[1], -warp[2], warp[3] };
+            claim[0] = q[3] * c[0] + q[0] * c[3] + q[1] * c[2] - q[2] * c[1]; claim[1] = q[3] * c[1] - q[0] * c[2] + q[1] * c[3] + q[2] * c[0];
+            claim[2] = q[3] * c[2] + q[0] * c[1] - q[1] * c[0] + q[2] * c[3]; claim[3] = q[3] * c[3] - q[0] * c[0] - q[1] * c[1] - q[2] * c[2];
+            x0 = 0.f; y0 = 0.f; rw = (float)m_SwapW[i]; rh = (float)m_SwapH[i];
+        }
+    }
+    else
+        drawn = srv ? g_Blit.DrawSrv(g.device, g.context, srv, dst, x0, y0, rw, rh, (DXGI_FORMAT)m_SwapFormat, fade, true)
+                    : g_Blit.Draw(g.device, g.context, source, dst, x0, y0, rw, rh, (DXGI_FORMAT)m_SwapFormat, fade);
+    if (!drawn) return false;
+    m_LastEyeTex[i] = dst;
+    m_ContentX[i] = (int)lroundf(x0); m_ContentY[i] = (int)lroundf(y0);
+    m_ContentW[i] = (int)lroundf(rw); m_ContentH[i] = (int)lroundf(rh);
+    m_EyeDecl[i] = declare; memcpy(m_EyeDeclTan[i], tan, 16);
+    memcpy(m_EyeImgQuat[i], pose, 16);
+    for (int k = 0; k < 7; k++) m_EyeRenderPose[i][k] = claim[k];
+    m_EyePoseValid[i] = true;
+    return true;
+}
+
+bool XRSession::DrawEye(int i, ID3D11Texture2D* source, ID3D11ShaderResourceView* srv, const float pose[7], const float tan[4], const float* warp,
+                        float fade, XrCompositionLayerProjectionView& pv)
+{
+    const bool declare = m_Declare;
+    { float x0, y0, rw, rh; EyeRect(i, tan, declare, x0, y0, rw, rh); }   // (the swapchain grown BEFORE an image is acquired)
+    uint32_t imgIndex = 0;
+    const bool acquired = AcquireWaitImage(g.swapchains[i], imgIndex);   // (not: the eye keeps its last image)
+    ID3D11Texture2D* dst = acquired ? g.images[i][imgIndex].texture : nullptr;
+    const bool drawn = DrawInto(i, source, srv, dst, tan, warp, declare, fade, pose);
+    if (acquired)
+    {
+        XrSwapchainImageReleaseInfo ri = { XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+        Watchdog::Mark mk("xrReleaseSwapchainImage"); xrReleaseSwapchainImage(g.swapchains[i], &ri);
+    }
+    FillEyeView(i, pv);
+    return drawn;
+}
+
+bool XRSession::CopyPairLeft(ID3D11Texture2D* dst)
+{
+    if (!dst || !m_PairTex || !g.context) return false;
+    D3D11_TEXTURE2D_DESC d = {}; dst->GetDesc(&d);
+    if (d.Width != m_PairW || d.Height != m_PairH || (int)d.Format != m_PairFmt || d.SampleDesc.Count != 1) return false;
+    g.context->CopyResource(dst, m_PairTex);
+    return true;
+}
+
+bool XRSession::ResubmitLast()
+{
+    if (!m_FrameStarted) return false;
+    XrCompositionLayerProjection layer; XrCompositionLayerProjectionView views[kMaxEyes];
+    {
+        std::lock_guard<std::mutex> lk(pump.m);
+        if (!pump.haveLayers) return false;
+        layer = pump.proj;
+        for (uint32_t v = 0; v < layer.viewCount && v < (uint32_t)kMaxEyes; v++) views[v] = pump.views[v];
+    }
+    layer.views = views;
+    EndFrameWithLayers(layer);
+    return true;
+}
+
+bool XRSession::SubmitPair(ID3D11Texture2D* right, const float quat[4], const float pos[3], unsigned long long pair, const float* tan, const float* warp)
+{
+    float tanR[4]; memcpy(tanR, tan ? tan : m_SrcTan, 16);
+    if (!m_FrameStarted || m_ViewCount != 2 || !OrthoReady() || m_MatchedFov) return false;
+    if (!m_PairStaged || m_PairId != pair || !m_PairSrv) return false;
+    const float fade = m_FrameFade < 0.f ? 0.f : (m_FrameFade > 1.f ? 1.f : m_FrameFade);
+    m_FrameFade = 1.f; m_ResyncEyes = false; m_RenderPoseValid = false;
+    const float poseR[7] = { quat[0], quat[1], quat[2], quat[3], pos[0], pos[1], pos[2] };
+    XrCompositionLayerProjectionView projViews[kMaxEyes] = {};
+    DrawEye(0, nullptr, m_PairSrv, m_PairPose, m_PairTan, m_PairWarp, fade, projViews[0]);
+    DrawEye(1, right, nullptr, poseR, tanR, warp, fade, projViews[1]);
+    m_PairStaged = false;
+    memcpy(m_SrcTan, tanR, 16);       // (the snapshot keeps the frustum of the picture it keeps)
+    // the menu screen's frozen backdrop: both eyes' pictures (vr backdropeyes 1), or the right one's for both (0, before)
+    OfferSnapshot(right, quat, m_BackdropEyes ? m_PairSrv : nullptr, m_PairPose, m_PairTan);
+    XrCompositionLayerProjection layer = { XR_TYPE_COMPOSITION_LAYER_PROJECTION };
+    layer.space = g.space;
+    layer.viewCount = m_ViewCount;
+    layer.views = projViews;
+    m_PairsSubmitted++;
+    EndFrameWithLayers(layer);
+    return true;
 }
 
 //! HUD quad layer: head-locked panel at a comfortable virtual depth. The
@@ -1773,7 +2090,7 @@ void XRSession::EndFrameWithLayers(XrCompositionLayerProjection& layer)
                     // put while the head moves (floating inventory panel).
                     if (!m_QuadLockValid)
                     {
-                        const XREyePose& e = m_Eyes[0];
+                        const XREyePose& e = m_Head;
                         // Head forward = quat * (0,0,-1).
                         const float fx = -(2.0f * (e.quatX * e.quatZ + e.quatW * e.quatY));
                         const float fz = -(1.0f - 2.0f * (e.quatX * e.quatX + e.quatY * e.quatY));
@@ -1938,23 +2255,23 @@ bool XRSession::AppendPanelLayer(int slot, XrCompositionLayerQuad& quad)
 
 //! Every ~0.2 s of play, the picture just drawn (still in the blitter's copy) goes into the ring at half size, with
 //! the pose it was claimed at and its tangent extents. Not while one is frozen in the ring.
-void XRSession::OfferSnapshot(ID3D11Texture2D* source, const float quat[4])
+void XRSession::OfferSnapshot(ID3D11Texture2D* source, const float quat[4], ID3D11ShaderResourceView* left, const float leftQuat[4], const float leftTan[4])
 {
     const long long now = Qpc();
     if (QpcSec(now - m_LastSnapQpc) < 0.2 || !g_Blit.ready || !g_Blit.srv || !g.device || !g.context) return;
     D3D11_TEXTURE2D_DESC sd = {}; source->GetDesc(&sd);
     const UINT w = std::max(64u, sd.Width / 2), h = std::max(64u, sd.Height / 2);
     const DXGI_FORMAT f = Blitter::ViewFormat(sd.Format, DXGI_FORMAT_UNKNOWN);
-    if (!g_SnapTex[0] || g_SnapW != w || g_SnapH != h || g_SnapFmt != f)
+    if (!g_SnapTex[0][0] || g_SnapW != w || g_SnapH != h || g_SnapFmt != f)
     {
         ReleaseSnaps();
         for (Snap& s : m_Snap) s.valid = false;
         m_Frozen = -1;
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 6; i++)
         {
             D3D11_TEXTURE2D_DESC cd = {}; cd.Width = w; cd.Height = h; cd.MipLevels = 1; cd.ArraySize = 1; cd.Format = f;
             cd.SampleDesc = { 1, 0 }; cd.Usage = D3D11_USAGE_DEFAULT; cd.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-            if (FAILED(g.device->CreateTexture2D(&cd, nullptr, &g_SnapTex[i])) || FAILED(g.device->CreateShaderResourceView(g_SnapTex[i], nullptr, &g_SnapSrv[i])))
+            if (FAILED(g.device->CreateTexture2D(&cd, nullptr, &g_SnapTex[i / 2][i % 2])) || FAILED(g.device->CreateShaderResourceView(g_SnapTex[i / 2][i % 2], nullptr, &g_SnapSrv[i / 2][i % 2])))
             {
                 LOGI("XRSession: backdrop pictures {}x{} format {} could not be created", w, h, (int)f);
                 ReleaseSnaps(); m_LastSnapQpc = now;   // tried again on a later offer
@@ -1965,9 +2282,17 @@ void XRSession::OfferSnapshot(ID3D11Texture2D* source, const float quat[4])
     }
     int slot = m_SnapNext;
     if (slot == m_Frozen) slot = (slot + 1) % 3;
-    if (!g_Blit.DrawSrv(g.device, g.context, g_Blit.srv, g_SnapTex[slot], 0.f, 0.f, (float)w, (float)h, f, 1.f, false)) return;
+    // a pair: the left picture (its staged copy) into eye 0, the right one (still in the blitter's copy) into eye 1
+    const bool two = left && leftQuat && leftTan;
+    if (two && !g_Blit.DrawSrv(g.device, g.context, left, g_SnapTex[slot][0], 0.f, 0.f, (float)w, (float)h, f, 1.f, false)) return;
+    if (!g_Blit.DrawSrv(g.device, g.context, g_Blit.srv, g_SnapTex[slot][two ? 1 : 0], 0.f, 0.f, (float)w, (float)h, f, 1.f, false)) return;
     Snap& s = m_Snap[slot];
-    for (int i = 0; i < 4; i++) { s.quat[i] = quat[i]; s.tan[i] = m_SrcTan[i]; }
+    s.two = two;
+    for (int i = 0; i < 4; i++)
+    {
+        s.quat[i] = two ? leftQuat[i] : quat[i]; s.tan[i] = two ? leftTan[i] : m_SrcTan[i];
+        s.quatR[i] = quat[i]; s.tanR[i] = m_SrcTan[i];
+    }
     s.qpc = now; s.valid = true;
     m_SnapNext = (slot + 1) % 3;
     m_LastSnapQpc = now;
@@ -1980,7 +2305,7 @@ bool XRSession::FreezeBackdrop(float minAge, float maxAge)
     int best = -1; long long bestQpc = 0;
     for (int i = 0; i < 3; i++)
     {
-        if (!m_Snap[i].valid || !g_SnapSrv[i]) continue;
+        if (!m_Snap[i].valid || !g_SnapSrv[i][0]) continue;
         const double age = QpcSec(now - m_Snap[i].qpc);
         if (age < minAge || age > maxAge) continue;
         if (best < 0 || m_Snap[i].qpc > bestQpc) { best = i; bestQpc = m_Snap[i].qpc; }
@@ -1998,7 +2323,7 @@ void XRSession::SubmitScreen(const XRBackdrop& b)
     if (!m_FrameStarted)
         return;
     XrCompositionLayerProjectionView projViews[kMaxEyes] = {};
-    const bool snap = m_Frozen >= 0 && b.snapshot > 0.f && g_SnapSrv[m_Frozen];
+    const bool snap = m_Frozen >= 0 && b.snapshot > 0.f && g_SnapSrv[m_Frozen][0];
     for (int i = 0; i < m_ViewCount; i++)
     {
         if (!m_SwapW[i] || !m_SwapH[i]) EnsureEyeSwapchain(i, m_EyeWidth, m_EyeHeight);
@@ -2010,14 +2335,17 @@ void XRSession::SubmitScreen(const XRBackdrop& b)
             {
                 const XrPosef& p = g.views[i].pose; const XrFovf& fv = g.views[i].fov;
                 const Snap& sn = m_Snap[snap ? m_Frozen : 0];
+                // each eye its own eye's picture when the pair kept both (its outer edge is in it), else the one picture
+                const bool own = snap && sn.two && i == 1;
+                const float* sq = own ? sn.quatR : sn.quat; const float* st = own ? sn.tanR : sn.tan;
                 const float k[24] = {
                     p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w,
                     tanf(fv.angleLeft), tanf(fv.angleRight), tanf(fv.angleUp), tanf(fv.angleDown),
-                    sn.quat[0], sn.quat[1], sn.quat[2], sn.quat[3],
-                    sn.tan[0], sn.tan[1], sn.tan[2], sn.tan[3],
+                    sq[0], sq[1], sq[2], sq[3],
+                    st[0], st[1], st[2], st[3],
                     snap ? b.snapshot : 0.f, b.env, b.fade, b.desat,
                     b.glowDir[0], b.glowDir[1], b.glowDir[2], b.glow };
-                if (g_BackdropR.Run(g.device, g.context, dst, m_SwapW[i], m_SwapH[i], (DXGI_FORMAT)m_SwapFormat, k, snap ? g_SnapSrv[m_Frozen] : nullptr, "backdrop"))
+                if (g_BackdropR.Run(g.device, g.context, dst, m_SwapW[i], m_SwapH[i], (DXGI_FORMAT)m_SwapFormat, k, snap ? g_SnapSrv[m_Frozen][own ? 1 : 0] : nullptr, "backdrop"))
                 {
                     m_LastEyeTex[i] = dst;
                     m_ContentX[i] = 0; m_ContentY[i] = 0; m_ContentW[i] = (int)m_SwapW[i]; m_ContentH[i] = (int)m_SwapH[i];
@@ -2417,6 +2745,9 @@ bool XRSession::Shutdown(bool processExit)
         return false;
     }
     g_Blit.Release();
+    if (m_PairSrv) { m_PairSrv->Release(); m_PairSrv = nullptr; }
+    if (m_PairTex) { m_PairTex->Release(); m_PairTex = nullptr; }
+    m_PairStaged = false; m_PairW = m_PairH = 0;
     g_Wrist.Release();
     g_PanelR.Release();
     g_BackdropR.Release();

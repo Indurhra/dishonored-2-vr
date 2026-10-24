@@ -34,6 +34,8 @@
 #include "Settings.h"
 #include "RenderRes.h"
 #include "StereoTaa.h"
+#include "StereoSync.h"
+#include "MetaAsw.h"
 #include "ScreenMode.h"
 #include <fstream>
 #include <cmath>
@@ -71,6 +73,35 @@ namespace
         else if (what == "xrwaitbound") { int ms = 50; ss >> ms; VRRuntime::SetWaitBound(ms); }
         else if (what == "xrkick") { float sec = 5.f; std::string all; ss >> sec >> all; VRRuntime::SetKick(sec, all == "all"); }
         else if (what == "d3dmt") { int m = 1; ss >> m; VRRuntime::SetD3DProtect(m != 0); }
+        // Meta's ASW for this game (MetaAsw): 1 = off for the app in VR focus (default), 0 = left to Meta
+        else if (what == "metaasw") { int m = 1; ss >> m; MetaAsw::SetMode(m); }
+        // pose prediction: 0 = the poses of the last frame (before); 1 = located k display periods ahead,
+        // for when the image is shown (default); 2 = the learned gap as measured. predictservo: the head-aim servo's
+        // target at the next view's display time too. predictmax: the farthest ahead (ms).
+        else if (what == "predict") { int m = 1; ss >> m; VRRuntime::SetPredict(m); }
+        else if (what == "predictservo") { int m = 1; ss >> m; VRRuntime::SetPredictServo(m != 0); }
+        else if (what == "predictmax") { float ms = 120.f; ss >> ms; VRRuntime::SetPredictMax(ms); }
+        // the hands drawn from the poses their VIEW was built from (1, default) or from the latest located (0, before)
+        else if (what == "handsfromview") { int m = 1; ss >> m; GpuTrace::SetHandsFromView(m != 0); }
+        // eye phasing: 1 = the TAA's measured view wins over the frame-order rule (default), 0 = the rule only (before)
+        else if (what == "phaseloop") { int m = 1; ss >> m; VRRuntime::SetPhaseClosed(m != 0); }
+        // synchronised stereo falls back to mono when no pair reaches the headset (1, default)
+        else if (what == "stereohealth") { int m = 1; ss >> m; VRRuntime::SetStereoHealth(m != 0); }
+        // the desktop window in synchronised stereo: 0 = the left eye (default), -1 = as presented (alternating eyes)
+        else if (what == "mirroreye") { int m = 0; ss >> m; VRRuntime::SetMirrorEye(m); }
+        // an unpaired stereo image to its own eye (1, default) or to both as mono (0, before); the frozen backdrop of
+        // the menu screen keeps both eyes' pictures of a pair (1, default) or the right one's (0, before)
+        else if (what == "unpairedeye") { int m = 1; ss >> m; VRRuntime::SetUnpairedOwnEye(m != 0); }
+        else if (what == "backdropeyes") { int m = 1; ss >> m; VRRuntime::SetBackdropEyes(m != 0); }
+        // test of phaseloop: the frame-order rule put n views off (measured: +-1 undone within 2 frames)
+        else if (what == "phaseoffset") { int d = 0; ss >> d; VRRuntime::SetPhaseOffset(d); }
+        // per-eye frustum: 1 = each stereo eye's view turned to its frustum's centre with its own
+        // symmetric fov (default), `margin` degrees more on each side (default 0); 2 = the asymmetric matrix (research:
+        // breaks the engine's tiled lighting); 0 = every view the symmetric cover of both eyes (before). layerfov: 0 = the
+        // eye's native pose and fov, a turned image warped into it (default); 1 = the layer declares each stereo image's
+        // own pose and fov (the only way a margin reaches the compositor; Meta's runtime does not honour it: double image)
+        else if (what == "eyeproj") { int m = 1; float mg = CameraHook::EyeProjMargin(); ss >> m >> mg; CameraHook::SetEyeProj(m, mg); }
+        else if (what == "layerfov") { int m = 0; ss >> m; VRRuntime::SetLayerFov(m); }
         else return false;
         return true;
     }
@@ -924,6 +955,7 @@ namespace
             if (BodyView::Command(what, ss)) return;
             if (RenderRes::Command(what, ss)) return;
             if (StereoTaa::Command(what, ss)) return;
+            if (StereoSync::Command(what, ss)) return;
             if (ScreenMode::Command(what, ss)) return;
             if (KbmInject::Command(what, ss)) return;
             {   // cutscenes
@@ -1072,10 +1104,16 @@ namespace
                 // help, r_skipTemporalAA 1 did). So stereo used to switch TAA off -- and with it all the game's AA.
                 // Since 2026-10-14 each eye has its own TAA (StereoTaa, which owns r_skipTemporalAA): `vr stereotaa 0`
                 // = the old way.
+                // 1 = alternating eyes (each frame one eye, the other keeps its older image: the eyes see two instants of
+                // the world, ghosting in motion); 2 = synchronised (StereoSync: two frames per pair, the second one held,
+                // both eyes from one instant and one located head pose, submitted together).
                 int m = 1; ss >> m;
                 StereoTaa::OnStereoChange(m != 0);
-                VRRuntime::SetStereo(m != 0);
-                LOGI("cmd vr stereo {} ({})", m, !m ? "mono" : StereoTaa::KeepTaaInStereo() ? "each eye its own TAA (StereoTaa)" : "TAA off in stereo (vr stereotaa 0)");
+                StereoSync::SetActive(m == 2);
+                VRRuntime::SetStereo(m == 1);
+                VRRuntime::NoteStereoCommand();
+                LOGI("cmd vr stereo {} ({}{})", m, !m ? "mono" : m == 2 ? "synchronised, " : "alternating, ",
+                     !m ? "" : StereoTaa::KeepTaaInStereo() ? "each eye its own TAA (StereoTaa)" : "TAA off in stereo (vr stereotaa 0)");
             }
             else if (what == "headaim") { int m = 1; ss >> m; KbmInject::SetHeadAim(m != 0); ViewMatrixHook::SetKeepGameAxis(m != 0); LOGI("cmd vr headaim {}", m); }
             // 0 (default) = the controllers do not touch the game's menus; 1 = they do, the pre-2026-09-15 behaviour.
@@ -1108,9 +1146,14 @@ namespace
           << "xr_init " << st.initialized << "\nxr_running " << st.running << "\nxr_state " << st.state
           << "\nxr_frames " << st.framesSubmitted << "\nxr_eye " << st.eyeW << "x" << st.eyeH
           << "\nxr_runtime " << st.runtime << "\nxr_system " << st.system << "\nxr_error " << st.error
-          << "\nxr_stereo " << VRRuntime::Stereo() << " eye " << VRRuntime::CurrentEye() << "\n";
+          << "\nxr_stereo " << VRRuntime::Stereo() << " mode " << (StereoSync::Active() ? "2 synchronised" : VRRuntime::Stereo() ? "1 alternating" : "0 mono") << " eye " << VRRuntime::CurrentEye() << " presented " << VRRuntime::PresentedEye() << "\n";
         f << RenderRes::Status() << "\n";
         f << StereoTaa::Status() << "\n";
+        f << StereoSync::Status() << "\n";
+        f << MetaAsw::Status() << "\n";
+        f << VRRuntime::SyncStatus() << "\n";
+        f << VRRuntime::PredictStatus() << "\n";
+        f << CameraHook::EyeProjStatus() << " | layerfov " << VRRuntime::LayerFov() << "\n";
         f << ScreenMode::Status() << "\n";
         f << Watchdog::Status() << "\n";
         f << VRRuntime::PumpStatus() << "\n";
@@ -1208,7 +1251,7 @@ namespace
             auto ks = KbmInject::GetStats();
             f << "kbm_ticks " << ks.ticks << " input " << ks.inputTicks << " fg " << ks.fgTicks << " keys " << ks.keyEvents << " mouse " << ks.mouseEvents
               << " held 0x" << std::hex << ks.heldMask << std::dec << " on " << KbmInject::Enabled() << " lastdx " << ks.lastDx << " maxturn " << ks.maxTurnX << " headaim " << KbmInject::HeadAim() << " yawerr " << ks.yawError << " pitcherr " << ks.pitchError << " bodyyaw " << ks.bodyYaw << " headyaw " << ks.headYaw << " sim " << ks.simulating << " menuinput " << KbmInject::MenuInput() << " menusafe " << ks.menuSafe << " fpdraws " << ks.fpDraws
-              << " mode " << (ks.mode == 0 ? "play" : ks.mode == 1 ? "menu" : "wheel") << " sprint " << ks.sprint << " states " << PlayerState::RunningCount() << " possess " << ks.possessing << " scene " << ks.scene << "\n";
+              << " mode " << (ks.mode == 0 ? "play" : ks.mode == 1 ? "menu" : "wheel") << " sprint " << ks.sprint << " states " << PlayerState::RunningCount() << " possess " << ks.possessing << " scene " << ks.scene << " playrule " << ks.playRule << " latched " << ks.playLatched << "\n";
             f << KbmInject::ControlsInfo() << "\n";
             f << BinkVideo::Status() << "\n";
             {

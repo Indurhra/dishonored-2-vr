@@ -3,8 +3,11 @@
 #include "GameInfo.h"
 #include "VRRuntime.h"
 #include "ScreenMode.h"
+#include "VRMath.h"
+#include "ViewMatrixHook.h"
 #include <detours/detours.h>
 #include <cmath>
+#include <algorithm>
 
 namespace
 {
@@ -145,6 +148,7 @@ namespace
     std::atomic<float> g_FovOvX{ 0.f }, g_FovOvY{ 0.f };
     std::atomic<float> g_GameFovX{ 0.f }, g_GameFovY{ 0.f }, g_BuiltFovX{ 0.f }, g_BuiltFovY{ 0.f };
     std::atomic<unsigned long long> g_FovOverrides{ 0 }, g_FlatWidened{ 0 }, g_ExplicitBuilds{ 0 };
+    std::atomic<unsigned long long> g_EyeFovViews[2] = {};   // views built with a stereo eye's own fov (per-eye frustum, mode 1)
     void ProjHook(void* rv, float* out, float a, float b, void* e, int f, int g)
     {
         uint8_t* mv = (uint8_t*)g_MainView.load();
@@ -154,7 +158,15 @@ namespace
             float* fx = (float*)((uint8_t*)rv + CameraHook::kRV_FovX);
             float* fy = (float*)((uint8_t*)rv + CameraHook::kRV_FovY);
             g_GameFovX = *fx * 57.29578f; g_GameFovY = *fy * 57.29578f;
-            const float ox = g_FovOvX.load(), oy = g_FovOvY.load();
+            float ox = g_FovOvX.load(), oy = g_FovOvY.load();
+            // A stereo eye's view (CameraHook::EyeTans, mode 1): its own symmetric fov, in the frame ViewMatrixHook turns it
+            // to. Which view this is comes from the same state ViewMatrixHook decides by a moment later, on this thread.
+            if (ox > 1.f && oy > 1.f && VRRuntime::Stereo() && !ScreenMode::FlatRender())
+            {
+                const int ne = ViewMatrixHook::NextViewEye();
+                float ex = 0.f, ey = 0.f;
+                if (ne >= 0 && CameraHook::EyeViewFov(ne, ex, ey)) { ox = ex; oy = ey; g_EyeFovViews[ne]++; }
+            }
             // On the menu screen (ScreenMode) the picture is the flat game's: its own fov (the title screen's camera is
             // a 19-degree shot; at the headset's 108 degrees it was a wide view of a set). The game's fov follows the
             // render size's aspect from its horizontal, so the 16:9 band shown is exactly the flat game's 16:9 view.
@@ -184,6 +196,236 @@ namespace
         }
         g_RealProj(rv, out, a, b, e, f, g);
     }
+}
+
+namespace
+{
+    // ---- per-eye projection (see the header) ----
+    std::atomic<int> g_EyeProj{ 1 };
+    std::atomic<float> g_EyeMargin{ 0.f };
+    std::atomic<bool> g_EyeLayoutOk{ true };          // the engine's projection has the shape the rewrite expects
+    std::atomic<unsigned long long> g_EyeApplied[2] = {}, g_EyeSkipped{ 0 };
+    constexpr float kMaxSide = 75.f / 57.29578f;      // no side beyond 75 deg (as vr fov auto's 150 deg cap)
+
+    float ClampAng(float a) { return std::clamp(a, -kMaxSide, kMaxSide); }
+    //! Eye e's native fov (radians L R U D) from the last located frame.
+    bool EyeFov(int e, float f[4])
+    {
+        const VRRuntime::Placement pl = VRRuntime::GetPlacement(e);
+        if (!pl.valid || !(pl.fov[1] > pl.fov[0]) || !(pl.fov[2] > pl.fov[3])) return false;
+        memcpy(f, pl.fov, 16); return true;
+    }
+    //! Mode 1, one candidate: the frame turned to (ax, ay) (radians, + right / + up, no roll) as a rotation matrix m
+    //! (columns = its axes in the eye's frame: v_eye = m v_render), and the symmetric half-tans that cover the eye
+    //! frustum's corners there (a central projection keeps straight lines: the frustum is the quadrilateral of its corners).
+    float TurnCover(const float cx[4], const float cy[4], float ax, float ay, float m[9], float& hx, float& hy)
+    {
+        const float fw[3] = { sinf(ax) * cosf(ay), sinf(ay), -cosf(ax) * cosf(ay) };
+        float rt[3] = { -fw[2], 0.f, fw[0] };   // fw x (0,1,0)
+        const float n = sqrtf(rt[0] * rt[0] + rt[2] * rt[2]); rt[0] /= n; rt[2] /= n;
+        const float up[3] = { rt[1] * fw[2] - rt[2] * fw[1], rt[2] * fw[0] - rt[0] * fw[2], rt[0] * fw[1] - rt[1] * fw[0] };
+        for (int k = 0; k < 3; k++) { m[k * 3] = rt[k]; m[k * 3 + 1] = up[k]; m[k * 3 + 2] = -fw[k]; }
+        hx = 0.f; hy = 0.f;
+        for (int c = 0; c < 4; c++)
+        {
+            const float v[3] = { cx[c], cy[c], -1.f };
+            const float x = m[0] * v[0] + m[3] * v[1] + m[6] * v[2], y = m[1] * v[0] + m[4] * v[1] + m[7] * v[2], z = m[2] * v[0] + m[5] * v[1] + m[8] * v[2];
+            const float d = std::max(-z, 0.05f);
+            hx = std::max(hx, fabsf(x / d)); hy = std::max(hy, fabsf(y / d));
+        }
+        return hx * hy;   // the pixel count at a fixed density
+    }
+    //! Mode 1: the frame eye frustum `f` (radians L R U D, margin included) is rendered in -- the turn that needs the
+    //! fewest pixels for a symmetric cover (searched from the angular centre, steps halving to 0.05 deg) -- as `rot`
+    //! (v_eye = rot * v_render) and its half-tans. Quest 3 left eye: turned 6.5 deg in and 5.25 down, 79% of the pixels
+    //! of the symmetric cover of both eyes (the asymmetric matrix would be 67%, see the header).
+    void TurnedFrame(const float f[4], float rot[4], float& hx, float& hy)
+    {
+        const float tl = tanf(f[0]), tr = tanf(f[1]), tu = tanf(f[2]), td = tanf(f[3]);
+        const float cx[4] = { tl, tr, tl, tr }, cy[4] = { tu, tu, td, td };
+        float ax = (f[0] + f[1]) * 0.5f, ay = (f[2] + f[3]) * 0.5f, m[9];
+        float best = TurnCover(cx, cy, ax, ay, m, hx, hy);
+        for (float step = 2.f / 57.29578f; step > 0.05f / 57.29578f; step *= 0.5f)
+            for (bool moved = true; moved;)
+            {
+                moved = false;
+                const float tries[4][2] = { { step, 0 }, { -step, 0 }, { 0, step }, { 0, -step } };
+                for (const auto& t : tries)
+                {
+                    float mm[9], x, y; const float a = TurnCover(cx, cy, ax + t[0], ay + t[1], mm, x, y);
+                    if (a < best - 1e-6f) { best = a; ax += t[0]; ay += t[1]; moved = true; break; }
+                }
+            }
+        TurnCover(cx, cy, ax, ay, m, hx, hy);
+        // rotation matrix (columns = the render frame's axes in the eye's) -> quaternion
+        const float m00 = m[0], m01 = m[1], m02 = m[2], m10 = m[3], m11 = m[4], m12 = m[5], m20 = m[6], m21 = m[7], m22 = m[8];
+        const float tr3 = m00 + m11 + m22;
+        if (tr3 > 0) { const float s = sqrtf(tr3 + 1.f) * 2; rot[3] = 0.25f * s; rot[0] = (m21 - m12) / s; rot[1] = (m02 - m20) / s; rot[2] = (m10 - m01) / s; }
+        else if (m00 > m11 && m00 > m22) { const float s = sqrtf(1.f + m00 - m11 - m22) * 2; rot[3] = (m21 - m12) / s; rot[0] = 0.25f * s; rot[1] = (m01 + m10) / s; rot[2] = (m02 + m20) / s; }
+        else if (m11 > m22) { const float s = sqrtf(1.f + m11 - m00 - m22) * 2; rot[3] = (m02 - m20) / s; rot[0] = (m01 + m10) / s; rot[1] = 0.25f * s; rot[2] = (m12 + m21) / s; }
+        else { const float s = sqrtf(1.f + m22 - m00 - m11) * 2; rot[3] = (m10 - m01) / s; rot[0] = (m02 + m20) / s; rot[1] = (m12 + m21) / s; rot[2] = 0.25f * s; }
+        const float n = sqrtf(rot[0] * rot[0] + rot[1] * rot[1] + rot[2] * rot[2] + rot[3] * rot[3]);
+        for (int k = 0; k < 4; k++) rot[k] /= n;
+    }
+    //! TurnedFrame, kept until the eye's fov or the margin changes (EyeTans is asked several times a frame)
+    struct TurnCache { float f[4] = {}; float rot[4] = { 0, 0, 0, 1 }; float hx = 0, hy = 0; bool valid = false; };
+    TurnCache g_Turn[2]; std::mutex g_TurnM;
+    void TurnedFrameCached(int e, const float f[4], float rot[4], float& hx, float& hy)
+    {
+        std::lock_guard lk(g_TurnM);
+        TurnCache& c = g_Turn[e & 1];
+        if (!c.valid || memcmp(c.f, f, 16) != 0) { TurnedFrame(f, c.rot, c.hx, c.hy); memcpy(c.f, f, 16); c.valid = true; }
+        memcpy(rot, c.rot, 16); hx = c.hx; hy = c.hy;
+    }
+    //! Both eyes' frusta with the margin, padded to one extent (rot: the render frame in the eye's, mode 1).
+    bool EyeTansBoth(CameraHook::Tans t[2], float rot[2][4])
+    {
+        const float m = std::clamp(g_EyeMargin.load(), 0.f, 15.f) / 57.29578f;
+        const int mode = g_EyeProj.load();
+        float hx[2] = {}, hy[2] = {};
+        for (int e = 0; e < 2; e++)
+        {
+            float f[4]; if (!EyeFov(e, f)) return false;
+            const float g[4] = { ClampAng(f[0] - m), ClampAng(f[1] + m), ClampAng(f[2] + m), ClampAng(f[3] - m) };
+            rot[e][0] = rot[e][1] = rot[e][2] = 0.f; rot[e][3] = 1.f;
+            if (mode == 1) TurnedFrameCached(e, g, rot[e], hx[e], hy[e]);
+            t[e].l = tanf(g[0]); t[e].r = tanf(g[1]); t[e].u = tanf(g[2]); t[e].d = tanf(g[3]);
+            t[e].valid = true;
+        }
+        if (mode == 1)
+        {   // one symmetric fov for both turned eyes
+            const float x = std::max(hx[0], hx[1]), y = std::max(hy[0], hy[1]);
+            for (int e = 0; e < 2; e++) { t[e].l = -x; t[e].r = x; t[e].u = y; t[e].d = -y; }
+            return true;
+        }
+        // one render size for both eyes: the narrower eye is widened (evenly) to the wider one's extent, so the pixel
+        // density is the same in both (headsets whose eyes are not mirror images)
+        const float ex = std::max(t[0].r - t[0].l, t[1].r - t[1].l), ey = std::max(t[0].u - t[0].d, t[1].u - t[1].d);
+        for (int e = 0; e < 2; e++)
+        {
+            const float px = (ex - (t[e].r - t[e].l)) * 0.5f, py = (ey - (t[e].u - t[e].d)) * 0.5f;
+            t[e].l -= px; t[e].r += px; t[e].d -= py; t[e].u += py;
+        }
+        return true;
+    }
+}
+
+void CameraHook::SetEyeProj(int mode, float marginDeg)
+{
+    g_EyeProj = std::clamp(mode, 0, 2); g_EyeMargin = std::clamp(marginDeg, 0.f, 15.f); g_EyeLayoutOk = true;
+    LOGI("CameraHook: per-eye frustum {} (margin {:.1f} deg a side)", g_EyeProj.load() == 1 ? "on: each stereo eye turned to its frustum's centre, its own symmetric fov"
+         : g_EyeProj.load() == 2 ? "ASYMMETRIC MATRIX (research: breaks the engine's tiled lighting)" : "off: every view the symmetric cover", g_EyeMargin.load());
+}
+int CameraHook::EyeProj() { return g_EyeProj.load(); }
+float CameraHook::EyeProjMargin() { return g_EyeMargin.load(); }
+
+bool CameraHook::EyeTans(int eye, Tans& t, float rot[4])
+{
+    Tans b[2]; float r[2][4];
+    if (eye < 0 || eye > 1 || !g_EyeProj.load() || !EyeTansBoth(b, r)) return false;
+    t = b[eye]; if (rot) memcpy(rot, r[eye], 16);
+    return true;
+}
+
+bool CameraHook::EyeViewFov(int eye, float& xDeg, float& yDeg)
+{
+    Tans t; if (g_EyeProj.load() != 1 || !EyeTans(eye, t)) return false;
+    xDeg = 2.f * atanf(t.r) * 57.29578f; yDeg = 2.f * atanf(t.u) * 57.29578f;
+    return xDeg > 1.f && yDeg > 1.f && xDeg < 170.f && yDeg < 170.f;
+}
+
+bool CameraHook::UnionTans(Tans& t)
+{
+    t = Tans(); t.l = t.d = 1e9f; t.r = t.u = -1e9f;
+    for (int e = 0; e < 2; e++)
+    {
+        float f[4]; if (!EyeFov(e, f)) return false;
+        float rel[4] = { 0, 0, 0, 1 }; VRRuntime::EyeRelative(e, rel);
+        const float tl = tanf(ClampAng(f[0])), tr = tanf(ClampAng(f[1])), tu = tanf(ClampAng(f[2])), td = tanf(ClampAng(f[3]));
+        const float cx[4] = { tl, tr, tl, tr }, cy[4] = { tu, tu, td, td };
+        for (int c = 0; c < 4; c++)
+        {   // the eye's corner direction (XR: -z forward), into the head's frame
+            const float v[3] = { cx[c], cy[c], -1.f }; float h[3]; VRMath::QRotate(rel, v, h);
+            const float z = std::max(-h[2], 0.05f);
+            t.l = std::min(t.l, h[0] / z); t.r = std::max(t.r, h[0] / z);
+            t.d = std::min(t.d, h[1] / z); t.u = std::max(t.u, h[1] / z);
+        }
+    }
+    const float k = tanf(kMaxSide);
+    t.l = std::max(t.l, -k); t.r = std::min(t.r, k); t.d = std::max(t.d, -k); t.u = std::min(t.u, k);
+    t.valid = true;
+    return true;
+}
+
+CameraHook::Tans CameraHook::BuiltTans()
+{
+    Tans t; const float x = g_BuiltFovX.load(), y = g_BuiltFovY.load();
+    if (x > 1.f && y > 1.f && x < 179.f && y < 179.f)
+    {
+        const float tx = tanf(x * 0.5f / 57.29578f), ty = tanf(y * 0.5f / 57.29578f);
+        t.l = -tx; t.r = tx; t.u = ty; t.d = -ty; t.valid = true;
+    }
+    return t;
+}
+
+bool CameraHook::ApplyEyeProjection(void* view, int eye, Tans& out)
+{
+    out = BuiltTans();
+    if (!view || eye < 0 || eye > 1 || g_EyeProj.load() != 2 || !VRRuntime::Stereo()) return false;
+    Tans t; if (!EyeTans(eye, t)) { g_EyeSkipped++; return false; }
+    float* P = (float*)((uint8_t*)view + kView_Proj);
+    // the shape the rewrite assumes (a perspective projection, rows x/y/z/w, w = depth): anything else is left alone
+    const float w2 = P[14];
+    const bool shape = fabsf(fabsf(w2) - 1.f) < 1e-3f && fabsf(P[12]) < 1e-6f && fabsf(P[13]) < 1e-6f && fabsf(P[15]) < 1e-6f &&
+                       fabsf(P[1]) < 1e-6f && fabsf(P[3]) < 1e-6f && fabsf(P[4]) < 1e-6f && fabsf(P[7]) < 1e-6f &&
+                       fabsf(P[0]) > 1e-3f && fabsf(P[5]) > 1e-3f;
+    if (!shape)
+    {
+        if (g_EyeLayoutOk.exchange(false))
+            LOGI("CameraHook: per-eye projection NOT applied: the main view's projection is not the expected shape ({:.4f} {:.4f} {:.4f} {:.4f} / {:.4f} {:.4f} {:.4f} {:.4f} / w {:.4f} {:.4f} {:.4f} {:.4f})",
+                 P[0], P[1], P[2], P[3], P[4], P[5], P[6], P[7], P[12], P[13], P[14], P[15]);
+        g_EyeSkipped++; return false;
+    }
+    // ndc = t / tx for the symmetric projection (tx = 1 / |p00| with |w| = 1); for [l, r]: ndc = (2t - (r + l)) / (r - l).
+    // The x row is scaled by a = 2 tx / (r - l) and gets the centre -(r + l) / (r - l); whatever the projection already
+    // carried in column 2 (the TAA jitter, in ndc) is kept as it is.
+    const float tx = 1.f / fabsf(P[0]), ty = 1.f / fabsf(P[5]);
+    const float ax = 2.f * tx / (t.r - t.l), bx = -(t.r + t.l) / (t.r - t.l);
+    const float ay = 2.f * ty / (t.u - t.d), by = -(t.u + t.d) / (t.u - t.d);
+    P[0] *= ax; P[2] += bx * w2;
+    P[5] *= ay; P[6] += by * w2;
+    float inv[16];
+    if (VRMath::Inverse4(P, inv)) memcpy((uint8_t*)view + kView_InvProj, inv, 64);
+    g_EyeApplied[eye]++;
+    out = t;
+    return true;
+}
+
+bool CameraHook::RenderExtent(float& ex, float& ey)
+{
+    Tans t;
+    if (g_EyeProj.load() && (g_EyeProj.load() == 1 || g_EyeLayoutOk.load()) && VRRuntime::Stereo() && EyeTans(0, t)) { ex = t.r - t.l; ey = t.u - t.d; return true; }
+    const float ox = g_FovOvX.load(), oy = g_FovOvY.load();
+    if (ox > 1.f && oy > 1.f) { ex = 2.f * tanf(ox * 0.5f / 57.29578f); ey = 2.f * tanf(oy * 0.5f / 57.29578f); return true; }
+    return false;
+}
+
+std::string CameraHook::EyeProjStatus()
+{
+    Tans l, r, u; const bool hl = EyeTans(0, l), hr = EyeTans(1, r), hu = UnionTans(u);
+    float ex = 0, ey = 0; const bool he = RenderExtent(ex, ey);
+    auto deg = [](float t) { return atanf(t) * 57.29578f; };
+    std::string s = fmt::format("eyeproj mode {} margin {:.1f} turnedviews L {} R {} | matrix shapeok {} applied L {} R {} skipped {} | extent {}", g_EyeProj.load(), g_EyeMargin.load(),
+                                g_EyeFovViews[0].load(), g_EyeFovViews[1].load(), g_EyeLayoutOk.load() ? 1 : 0, g_EyeApplied[0].load(), g_EyeApplied[1].load(),
+                                g_EyeSkipped.load(), he ? fmt::format("{:.3f}x{:.3f}", ex, ey) : std::string("-"));
+    float rl[4] = { 0, 0, 0, 1 }, rr[4] = { 0, 0, 0, 1 }; EyeTans(0, l, rl); EyeTans(1, r, rr);
+    auto turn = [](const float q[4]) {   // the turned frame's forward in the eye's: yaw (+ right) / pitch (+ up)
+        const float f[3] = { 0, 0, -1 }; float v[3]; VRMath::QRotate(q, f, v);
+        return fmt::format("{:+.1f}/{:+.1f}", atan2f(v[0], -v[2]) * 57.29578f, asinf(std::clamp(v[1], -1.f, 1.f)) * 57.29578f); };
+    if (hl) s += fmt::format(" | eye0 deg {:.1f} {:.1f} {:.1f} {:.1f} turn {}", deg(l.l), deg(l.r), deg(l.u), deg(l.d), turn(rl));
+    if (hr) s += fmt::format(" eye1 {:.1f} {:.1f} {:.1f} {:.1f} turn {}", deg(r.l), deg(r.r), deg(r.u), deg(r.d), turn(rr));
+    if (hu) s += fmt::format(" | union {:.1f} {:.1f} {:.1f} {:.1f}", deg(u.l), deg(u.r), deg(u.u), deg(u.d));
+    return s;
 }
 
 void CameraHook::SetFovOverride(float x, float y) { g_FovOvX = x; g_FovOvY = y; LOGI("CameraHook: fov override {:.1f} x {:.1f} deg{}", x, y, x > 1.f ? "" : " (off: the game's own)"); }

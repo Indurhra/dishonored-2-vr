@@ -350,8 +350,18 @@ the copy.
   world: previous from PerViewCB `cb_previousviewprojectionmatrix` (= view+0x7590). Entities: `cb_previousmvpmatrix*`
   in cb2, **cached from the last frame** (a few objects build theirs from the view).
 - Jitter: an 8-entry table at exe+0x1B35F10 indexed by `frame & 7`, scaled by 2/size; p02 = 2*jx, p12 = 2*jy.
-- With alternating-eye stereo the previous frame is the other eye's: TAA ghosts. Per-eye history + per-eye previous
-  matrices fix it ([StereoTaa.cpp](../src/Src/StereoTaa.cpp)). FXAA does not.
+- With stereo the previous frame is the other eye's: TAA ghosts. Per-eye history + per-eye previous matrices fix it
+  ([StereoTaa.cpp](../src/Src/StereoTaa.cpp)). FXAA does not.
+- An entity's cached previous MVP is the same draw's MVP in the last RENDERED frame (held frames included); the
+  skinning palettes (`ro_matrices`, `ro_previousframeskinningmatrices`) are renewed only on simulated frames. The
+  frame number view+0x77B4 advances on held frames too.
+- **Holding a frame** (synchronised stereo, [StereoSync.cpp](../src/Src/StereoSync.cpp)): `idGameLocal::RunFrame`
+  (exe+0x8ACDF0, vtable idGameLocal+0x18) replaced by the game's Draw alone (exe+0x8AC710, with this+0x340f08 pointed
+  at the frame's output struct) draws the same world again and loses no game time (the next tick gets both frames'
+  delta); `g_stopTime 1/2` for that frame loses time (0.55x). The engine reads DirectInput once a frame
+  (arkDirectInputKeyboard exe+0xE1970, idMouseWin32 exe+0xE2930) into a list the next read clears and only a simulated
+  frame consumes: the reads are skipped before a held frame. Holding while a pause menu opens crashed in Iggy
+  (exe+0x100B891, freed memory): only hold in play.
 
 ### 4.6 Render resolution, the window and the cfg writer
 - The engine renders at its window's **client size** (at most the desktop). What the size follows:
@@ -1184,6 +1194,7 @@ Where an older note or a source comment says otherwise, this is what holds (the 
 | A held prop's render model is rotated against its entity | It is not; the local box is the render model's bounds times the entity scale |
 | Pitch cannot be closed-loop (the view axis is flat) | The player's +0x30C is flat; the camera's +0xFC carries the pitch |
 | Alternating-eye stereo: submit the backbuffer to `eye ^ 1` | The phase varies between sessions; identify the image's view by command-list serials |
+| The presented image is the latest view (`vr posesource` before 2026-10-23) | It is the view that was the latest at the PREVIOUS Present (checked every frame against its TAA dispatch) |
 | Stereo needs TAA off (`r_skipTemporalAA 1`) | Per-eye TAA history and previous matrices work ([StereoTaa.cpp](../src/Src/StereoTaa.cpp)) |
 | `win_pauseOnFocusLoss 0` keeps the game running unfocused | The game still pauses on focus loss |
 | `arkCpntMana+0x2C` is the maximum | It is the regen level, lowered by every cast |

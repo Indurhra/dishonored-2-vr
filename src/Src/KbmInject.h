@@ -49,7 +49,8 @@ namespace KbmInject
     //! have the key bound to MELEE. A key cannot land on another window the way a click under the cursor can.
     void SetMeleeKey(int vk);
     struct Stats { unsigned long long ticks = 0, inputTicks = 0, fgTicks = 0, keyEvents = 0, mouseEvents = 0; unsigned heldMask = 0; float lastDx = 0, maxTurnX = 0, yawError = 0, pitchError = 0, bodyYaw = 0, headYaw = 0; bool simulating = true; bool menuSafe = false; int fpDraws = -1; int mode = 1; bool sprint = false; bool possessing = false;
-                   int scene = 0; };   //!< scene: a menu over the world (0 none, 1 the character choice, 2 a black market)
+                   int scene = 0;      //!< scene: a menu over the world (0 none, 1 the character choice, 2 a black market)
+                   int playRule = 1; bool playLatched = false; };   //!< vr playrule; this player has been seen playing
     Stats GetStats();
     //! Inside a possessed host (EnterPossessedHost began it; the arms coming back, death or a load end it).
     bool Possessing();

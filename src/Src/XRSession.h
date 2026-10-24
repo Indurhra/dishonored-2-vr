@@ -6,6 +6,7 @@ struct ID3D11Device;
 struct ID3D11Texture2D;
 struct XrCompositionLayerProjection;
 struct XrCompositionLayerQuad;
+struct XrCompositionLayerProjectionView;
 struct ID3D11ShaderResourceView;
 
 //! One eye's view pose + projection, in plain types (no OpenXR headers leaked).
@@ -151,6 +152,23 @@ public:
     //! (alternating-eye stereo). Must be called after BeginFrame() returned true.
     void SubmitFrame(ID3D11Texture2D* source, int onlyEye = -1);
 
+    //! Synchronised stereo (StereoSync): the LEFT image of a pair is kept (a copy) with the pose it was rendered from,
+    //! until its right image arrives a frame later; then SubmitPair draws both into their eyes and submits them in one
+    //! frame. No OpenXR call: the left image's Present needs no frame of its own. Render thread.
+    //! `tan`: the frustum each image was rendered with (left, right, up, down tangents in its own frame; null = the
+    //! source tans in force, SetSourceTans).
+    //! `warp`: its render frame relative to the eye (v_eye = warp * v_render; null = the same), see SetSourceWarp.
+    bool StagePairLeft(ID3D11Texture2D* source, const float quat[4], const float pos[3], unsigned long long pair, const float* tan = nullptr, const float* warp = nullptr);
+    //! False (nothing submitted) when the staged left image is not this pair's: the caller submits otherwise.
+    bool SubmitPair(ID3D11Texture2D* right, const float quat[4], const float pos[3], unsigned long long pair, const float* tan = nullptr, const float* warp = nullptr);
+    unsigned long long PairsSubmitted() const { return m_PairsSubmitted; }
+    void DropStagedPair() { m_PairStaged = false; }   //!< the staged left image is not to be paired (the eye phasing disagreed)
+    //! The last staged left image copied into `dst` (the desktop window shows one eye: VRRuntime's vr mirroreye).
+    bool CopyPairLeft(ID3D11Texture2D* dst);
+    unsigned EndFrameFails() const { return m_EndFrameFails; }
+    //! The last frame's projection layer again (the swapchains keep their last released images). After BeginFrame.
+    bool ResubmitLast();
+
     //! Full-rate stereo: submit BOTH eyes in one frame. Each source was
     //! rendered with that eye's pose ±IPD/2 AND its native fov (matched-fov),
     //! so both map across the full lens. Call after BeginFrame() returned true.
@@ -187,6 +205,12 @@ public:
     void SetOrtho(bool on) { m_Ortho = on; }
     bool Ortho() const { return m_Ortho; }
     void SetSourceTans(float l, float r, float u, float d) { m_SrcTan[0] = l; m_SrcTan[1] = r; m_SrcTan[2] = u; m_SrcTan[3] = d; }
+    //! The layer declares the fov each image was RENDERED with (its source tans, the whole image at the eye's pixel
+    //! density) instead of the eye's native fov with the image drawn into it (VRRuntime::SetLayerFov). In force from the
+    //! next submit on, until changed. Both are exact when the image's frame is the eye's; only the declared one is when
+    //! it is not (a mono image on canted displays), and only it hands the compositor a margin beyond the eye's fov.
+    void SetDeclareFov(bool on) { m_Declare = on; }
+    bool DeclareFov() const { return m_Declare; }
     //! The pose (XR LOCAL) the frame about to be submitted was RENDERED from (ViewMatrixHook::RenderPoseXr). The mono
     //! layer claims it instead of the pose just located, so the compositor timewarps the real difference. One submit.
     void SetRenderPose(const float q[4], const float p[3]) { for (int i = 0; i < 4; i++) m_RenderPose[i] = q[i]; for (int i = 0; i < 3; i++) m_RenderPose[4 + i] = p[i]; m_RenderPoseValid = true; }
@@ -239,6 +263,10 @@ public:
     //! The next submitted frame shows its picture to BOTH eyes (alternating stereo coming back from a menu: the other
     //! eye's swapchain still holds the backdrop). One frame.
     void ResyncEyes() { m_ResyncEyes = true; }
+    //! vr backdropeyes 0|1: the menu screen's frozen backdrop keeps both eyes' pictures of a synchronised pair (1) or
+    //! the right eye's only (0, before 2026-10-23: the left eye's outer edge showed the dim environment)
+    void SetBackdropEyes(bool on) { m_BackdropEyes = on; }
+    bool BackdropEyes() const { return m_BackdropEyes; }
     unsigned long long ScreenFrames() const { return m_ScreenFrames; }
     unsigned long long PanelFrames(int slot) const { return (unsigned)slot < 2 ? m_PanelFrames[slot] : 0; }
     unsigned long long Snapshots() const { return m_Snapshots; }
@@ -248,6 +276,18 @@ public:
     bool WristPose(int space, float q[4], float p[3]) const;
     float PitchOffset() const { return m_PitchOffset; }
     unsigned long long WristLayers() const { return m_WristLayers; }   //!< frames that carried the wrist layer
+
+    //! Pose prediction (VRRuntime::LocateForView): both eyes and both controllers' aim poses located for display time
+    //! `time` (XrTime, ns), as the image about to be built will be shown -- not the time of the last frame. The
+    //! controllers get ControllerPitchOffset as in SyncInput. False (nothing written) when the session does not run, the
+    //! head is not tracked, or a recenter takes effect before `time` (its generation is bumped by BeginFrame only).
+    //! Render thread: OpenXR allows xrLocateViews / xrLocateSpace while the frame thread is inside xrWaitFrame.
+    //! `head` (optional): the head at that time (see Head()).
+    bool LocateAt(long long time, XREyePose eyes[2], XRHandPose hands[2], XREyePose* head = nullptr);
+    //! The begun frame's predicted display time and period (XrTime, ns); 0 before the first frame.
+    long long FrameDisplayTime() const;
+    long long FramePeriod() const;
+    unsigned long long LocatesAhead() const { return m_LocatesAhead; }
 
     //! Syncs controller actions and locates hand poses for this frame.
     //! Call after BeginFrame(). No-op if input wasn't set up.
@@ -286,6 +326,13 @@ public:
 
     int EyeCount() const { return m_ViewCount; }
     const XREyePose& Eye(int i) const { return m_Eyes[i]; }
+    //! The HEAD this frame: position = the eyes' midpoint, orientation = the VIEW reference space's (the head's own
+    //! frame). Not the left eye's: on a headset with canted displays (Pimax without parallel projections) each eye is
+    //! turned ~10 deg out from the head, and everything that took the left eye for the head was 10 deg off. When the
+    //! runtime cannot locate VIEW (or gives something implausible) the two eyes' orientations averaged. No fov.
+    const XREyePose& Head() const { return m_Head; }
+    //! How far eye i's orientation is turned from the head's (degrees): 0 on parallel displays.
+    float EyeCant(int i) const;
     uint32_t EyeWidth() const { return m_EyeWidth; }
     uint32_t EyeHeight() const { return m_EyeHeight; }
     uint64_t FramesSubmitted() const { return m_FramesSubmitted; }
@@ -320,6 +367,7 @@ private:
     unsigned m_RecenterEvents = 0, m_RecenterGen = 0;
     bool m_RecenterPending = false; long long m_RecenterAt = 0;   //!< XrTime the pending change takes effect
     unsigned long long m_LostFrames[3] = {};
+    unsigned long long m_LocatesAhead = 0;
     int m_ViewCount = 0;
     uint32_t m_EyeWidth = 0, m_EyeHeight = 0;
     uint64_t m_FramesSubmitted = 0;
@@ -329,6 +377,10 @@ private:
     std::string m_RuntimeName;
     std::string m_SystemName;
     XREyePose m_Eyes[kMaxEyes];
+    XREyePose m_Head;                         //!< Head()
+    unsigned long long m_HeadFromView = 0, m_HeadAveraged = 0;
+    //! The head for these eyes at `time`: VIEW located, checked against the eyes, else their average.
+    void LocateHead(long long time, const XREyePose eyes[2], XREyePose& head);
     XRInputState m_Input;
     bool m_InputReady = false;
     bool m_HapticReady = false;
@@ -339,6 +391,15 @@ private:
     float m_RenderPose[7] = {}; bool m_RenderPoseValid = false;   //!< SetRenderPose
     bool m_Ortho = true;                     //!< mono frame drawn at its true angular size (SetOrtho)
     float m_SrcTan[4] = {};                  //!< the source's tan extents: left, right, up, down (0 = unknown)
+    bool m_Declare = false;                  //!< SetDeclareFov
+    bool m_EyeDecl[kMaxEyes] = {};           //!< eye i's last image went out with a declared fov (m_EyeDeclTan)
+    float m_EyeDeclTan[kMaxEyes][4] = {};
+    float m_PairTan[4] = {};                 //!< the staged left image's tans
+    //! Eye i's layer view: the pose its image was rendered at, and its fov / sub-image as last drawn (declared or native).
+    void FillEyeView(int i, XrCompositionLayerProjectionView& pv) const;
+    //! Where eye i's image goes in its swapchain: a declared image fills (0,0)-(w,h) at the eye's density; a native one
+    //! is the source's tan rect inside the eye's fov. Grows the swapchain as needed. False = no fov yet.
+    bool EyeRect(int i, const float tan[4], bool declare, float& x, float& y, float& w, float& h);
     float m_RenderedTanH = 0, m_RenderedTanV = 0; //!< symmetric render half-tangents
     bool m_FovLogged = false;                //!< one-shot native-fov log
     ID3D11Texture2D* m_QuadSource = nullptr; //!< HUD texture for the quad layer
@@ -358,10 +419,34 @@ private:
     float m_FrameFade = 1.f;
     bool m_ResyncEyes = false;
     // the frozen-backdrop ring (FreezeBackdrop): half-size pictures with the pose and tan extents they were seen with
-    struct Snap { float quat[4] = { 0, 0, 0, 1 }; float tan[4] = {}; long long qpc = 0; bool valid = false; };
+    struct Snap { float quat[4] = { 0, 0, 0, 1 }; float tan[4] = {}; long long qpc = 0; bool valid = false;
+                  bool two = false; float quatR[4] = { 0, 0, 0, 1 }; float tanR[4] = {}; };   //!< two: a pair, eye 0 and eye 1 kept
     Snap m_Snap[3];
     int m_SnapNext = 0, m_Frozen = -1; long long m_FrozenAt = 0, m_LastSnapQpc = 0;
-    void OfferSnapshot(ID3D11Texture2D* source, const float quat[4]);
+    //! `left` (+ its pose and tans): a synchronised pair's left picture, kept for the left eye (`source` = the right)
+    void OfferSnapshot(ID3D11Texture2D* source, const float quat[4], ID3D11ShaderResourceView* left = nullptr, const float leftQuat[4] = nullptr, const float leftTan[4] = nullptr);
+    bool m_BackdropEyes = true;
+    // the staged left image of a synchronised-stereo pair (StagePairLeft)
+    ID3D11Texture2D* m_PairTex = nullptr; ID3D11ShaderResourceView* m_PairSrv = nullptr;
+    unsigned m_PairW = 0, m_PairH = 0; int m_PairFmt = 0;
+    float m_PairPose[7] = {}; unsigned long long m_PairId = 0; bool m_PairStaged = false;
+    unsigned long long m_PairsSubmitted = 0;
+    bool DrawEye(int i, ID3D11Texture2D* source, ID3D11ShaderResourceView* srv, const float pose[7], const float tan[4], const float* warp, float fade,
+                 XrCompositionLayerProjectionView& pv);
+    //! One image into eye i's swapchain image `dst` (DrawEye, SubmitFrame): declared, or placed at its tans in the eye's
+    //! native fov -- warped when its render frame is turned from the eye's (`warp`: v_eye = warp * v_render, null =
+    //! none). Records the content rect and the pose the layer claims (`pose` = the render pose; a warped image is
+    //! claimed at the eye's own orientation, pose * conj(warp)).
+    bool DrawInto(int i, ID3D11Texture2D* source, ID3D11ShaderResourceView* srv, ID3D11Texture2D* dst, const float tan[4], const float* warp,
+                  bool declare, float fade, const float pose[7]);
+    float m_SrcWarp[kMaxEyes][4] = { { 0, 0, 0, 1 }, { 0, 0, 0, 1 } };   //!< SetSourceWarp (one submit)
+    float m_PairWarp[4] = { 0, 0, 0, 1 };                                //!< the staged left image's
+    float m_EyeImgQuat[kMaxEyes][4] = { { 0, 0, 0, 1 }, { 0, 0, 0, 1 } }; //!< the render frame of eye i's last image
+public:
+    //! The next SubmitFrame's image was rendered in a frame turned from eye i's (v_eye = q * v_render): a mono image on
+    //! canted displays, a stereo eye's turned frame. Placed into that eye's native fov with a warp. One submit.
+    void SetSourceWarp(int i, const float q[4]) { if ((unsigned)i < (unsigned)kMaxEyes) for (int k = 0; k < 4; k++) m_SrcWarp[i][k] = q[k]; }
+private:
     int m_ContentX[kMaxEyes] = {}, m_ContentY[kMaxEyes] = {};   //!< content rect in the
     int m_ContentW[kMaxEyes] = {}, m_ContentH[kMaxEyes] = {};   //!< eye texture (per eye)
     float m_EyeRenderPose[kMaxEyes][7] = {}; //!< pose eye i's image was rendered at (quat xyzw, pos xyz)

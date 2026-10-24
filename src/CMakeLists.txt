@@ -17,8 +17,8 @@ add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN UNI
 
 # The mod's version: the release number below plus the commit it was built from (shown in the log and in the DLLs'
 # file properties, so a tester's log says exactly which build it came from).
-set(DVR_VERSION_MAJOR 1)
-set(DVR_VERSION_MINOR 0)
+set(DVR_VERSION_MAJOR 0)
+set(DVR_VERSION_MINOR 5)
 set(DVR_VERSION_PATCH 0)
 set(DVR_VERSION "${DVR_VERSION_MAJOR}.${DVR_VERSION_MINOR}.${DVR_VERSION_PATCH}")
 set(DVR_GIT "nogit")
@@ -51,7 +51,9 @@ set_target_properties(dinput8 PROPERTIES OUTPUT_NAME dinput8 PREFIX ""
     RUNTIME_OUTPUT_DIRECTORY "${OUT_DIR}" RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OUT_DIR}")
 # The DLLs name their PDB by file name only, not by the absolute path of the build machine (which ends up in every
 # shipped binary otherwise); dbghelp finds it in the folder it is pointed at (tools/symbolize.py).
-target_link_options(dinput8 PRIVATE "/PDBALTPATH:%_PDB%")
+# The name is written out: "%_PDB%" went through the Visual Studio generator's escaping and the DLLs carried
+# "%%%DishonoredVR.pdb%%%", a name dbghelp never finds (tools/symbolize.py resolved nothing; measured 2026-10-23).
+target_link_options(dinput8 PRIVATE "/PDBALTPATH:dinput8.pdb")
 
 # --- the mod ---
 set(MOD_SOURCES
@@ -66,6 +68,8 @@ set(MOD_SOURCES
     Src/Overlay.cpp    Src/Overlay.h
     Src/WristHud.cpp   Src/WristHud.h
     Src/StereoTaa.cpp  Src/StereoTaa.h
+    Src/StereoSync.cpp Src/StereoSync.h
+    Src/MetaAsw.cpp Src/MetaAsw.h
     Src/ScreenMode.cpp Src/ScreenMode.h
     Src/BinkVideo.cpp  Src/BinkVideo.h
     Src/XRProbe.cpp    Src/XRProbe.h
@@ -115,4 +119,4 @@ target_link_libraries(DishonoredVR PRIVATE
     d3d11 dxgi version windowscodecs shell32 ole32)
 set_target_properties(DishonoredVR PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${OUT_DIR}" RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OUT_DIR}")
-target_link_options(DishonoredVR PRIVATE "/PDBALTPATH:%_PDB%")   # (see dinput8 above)
+target_link_options(DishonoredVR PRIVATE "/PDBALTPATH:DishonoredVR.pdb")   # (see dinput8 above)

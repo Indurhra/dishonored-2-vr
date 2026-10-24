@@ -52,7 +52,23 @@ namespace StereoTaa
     bool FixingPrev();
     //! The view matrix the PerViewCB `viewCb` held when last written (on this context if it wrote it), false if unknown.
     bool ViewMatrixOf(ID3D11DeviceContext* c, ID3D11Buffer* viewCb, float m[16]);
+    //! A mesh draw's PerViewCB (VS b1, the same layout as the TAA's): shadowed from now on, so ViewMatrixOf can say which
+    //! view the draw belongs to (GpuTrace places the player's arms and weapons with THAT view).
+    void LearnViewCb(ID3D11Buffer* viewCb);
+    //! The main view (ViewMatrixHook serial) of the latest TAA dispatch recorded since the last call, 0 = none.
+    unsigned long long TakeTaaSerial();
+    //! GpuTrace's command-list hooks: a deferred context's TAA view travels with its list to the immediate context.
+    void OnFinishList(void* ctx, void* list);
+    void OnExecuteList(void* list);
     bool PrevCorrection(ID3D11DeviceContext* c, ID3D11Buffer* viewCb, float C[16], const float* prevRows = nullptr, const float* curRows = nullptr);
+    //! The previous MVP rows of an entity's draw (`prev`, 16 floats, row-major, rewritten in place) for the eye of the
+    //! view its PerViewCB holds: `vr aaprevrule 1` = the engine's original previous of the draw that had these rows as
+    //! its current ones one frame before (falls back to C), 0 = C only (as before). `cur` = its current MVP rows (null
+    //! if the layout has none), `same` = the engine's previous equals the current (an object's first frame). True when
+    //! `prev` changed.
+    bool FixPrevRows(ID3D11DeviceContext* c, ID3D11Buffer* viewCb, const float* cur, float* prev, bool same);
+    std::string PrevRuleStatus();
+    void ResetPrevStats();
 
     //! 1 (default) = per-eye TAA in stereo; 0 = stereo switches TAA off (before 2026-10-14); 2 = research: TAA on with
     //! the engine's shared history (the ghosting that made us switch it off). Applies at once.

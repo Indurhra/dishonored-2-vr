@@ -45,6 +45,58 @@ namespace
     int g_RsSaved = -1;                             // rs_enable as the game had it before the mod held it off
     // Present rate, for measuring what the resolution costs
     LARGE_INTEGER g_FpsT{}; int g_FpsN = 0; float g_Fps = 0.f;
+    // GPU time per frame: a timestamp at every Present (inside a disjoint query per frame), read back 8 frames later.
+    // The difference of two consecutive ones is the GPU's frame time when it is the bottleneck (it never idles); with the
+    // CPU or the headset pacing, it is the frame period. Averaged over the last 2 s, like the fps.
+    struct GpuStamp { ID3D11Query* disj = nullptr; ID3D11Query* ts = nullptr; bool issued = false; unsigned long long frame = 0; };
+    constexpr int kStamps = 8;
+    GpuStamp g_Stamp[kStamps]; int g_StampHead = 0; bool g_StampBad = false; unsigned long long g_StampFrame = 0;
+    unsigned long long g_LastTsFrame = 0; UINT64 g_LastTs = 0;
+    double g_GpuRing[256] = {}; LARGE_INTEGER g_GpuRingT[256] = {}; int g_GpuHead = 0, g_GpuCount = 0; float g_GpuMs = 0.f;
+    void GpuTime(IDXGISwapChain* sc)
+    {
+        if (g_StampBad) return;
+        ID3D11Device* dev = nullptr;
+        if (FAILED(sc->GetDevice(__uuidof(ID3D11Device), (void**)&dev)) || !dev) return;
+        ID3D11DeviceContext* ctx = nullptr; dev->GetImmediateContext(&ctx);
+        GpuStamp& s = g_Stamp[g_StampHead];
+        if (!s.ts)
+        {
+            D3D11_QUERY_DESC qd = { D3D11_QUERY_TIMESTAMP_DISJOINT, 0 }, qt = { D3D11_QUERY_TIMESTAMP, 0 };
+            if (FAILED(dev->CreateQuery(&qd, &s.disj)) || FAILED(dev->CreateQuery(&qt, &s.ts))) { g_StampBad = true; LOGI("RenderRes: GPU timestamps not available"); }
+        }
+        if (!g_StampBad && s.issued)
+        {   // this slot's frame, 8 Presents ago
+            D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj = {}; UINT64 t = 0;
+            if (ctx->GetData(s.disj, &dj, sizeof dj, D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK && ctx->GetData(s.ts, &t, sizeof t, D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK)
+            {
+                if (!dj.Disjoint && dj.Frequency && g_LastTs && g_LastTsFrame + 1 == s.frame && t > g_LastTs)
+                {
+                    LARGE_INTEGER now; QueryPerformanceCounter(&now);
+                    g_GpuRing[g_GpuHead] = (double)(t - g_LastTs) * 1000.0 / (double)dj.Frequency; g_GpuRingT[g_GpuHead] = now;
+                    g_GpuHead = (g_GpuHead + 1) % 256; if (g_GpuCount < 256) g_GpuCount++;
+                    LARGE_INTEGER f; QueryPerformanceFrequency(&f);
+                    double sum = 0; int n = 0;
+                    for (int i = 0; i < g_GpuCount; i++)
+                    {
+                        const int k = (g_GpuHead - 1 - i + 256) % 256;
+                        if ((double)(now.QuadPart - g_GpuRingT[k].QuadPart) / f.QuadPart > 2.0) break;
+                        sum += g_GpuRing[k]; n++;
+                    }
+                    if (n) g_GpuMs = (float)(sum / n);
+                }
+                g_LastTs = dj.Disjoint ? 0 : t; g_LastTsFrame = s.frame;
+            }
+            s.issued = false;
+        }
+        if (!g_StampBad && !s.issued)
+        {
+            ctx->Begin(s.disj); ctx->End(s.ts); ctx->End(s.disj);
+            s.issued = true; s.frame = ++g_StampFrame;
+            g_StampHead = (g_StampHead + 1) % kStamps;
+        }
+        ctx->Release(); dev->Release();
+    }
 
     BOOL WINAPI HkGetClientRect(HWND h, LPRECT r)
     {
@@ -158,12 +210,14 @@ namespace
         if (dx <= 0.f || dy <= 0.f) { why = "eye fov not known yet"; return false; }
         const float s = std::clamp(g_Scale.load(), 0.25f, 2.f);
         float ox = 0.f, oy = 0.f; CameraHook::FovOverride(ox, oy);
-        float fw, fh;
-        if (ox > 1.f && oy > 1.f)
-        {   // the mod's render fov (vr fov auto: both eyes' fov): any aspect, so both axes at the eye's density
-            fw = dx * 2.f * tanf(ox * 0.5f / 57.29578f) * s;
-            fh = dy * 2.f * tanf(oy * 0.5f / 57.29578f) * s;
-            why = "headset";
+        float fw, fh, ex = 0.f, ey = 0.f;
+        if (ox > 1.f && oy > 1.f && CameraHook::RenderExtent(ex, ey))
+        {   // the mod's render fov (vr fov auto: both eyes' fov): any aspect, so both axes at the eye's density. In stereo
+            // with the per-eye projection the frustum is one eye's own (CameraHook::RenderExtent): fewer pixels at the
+            // same density, not a sharper picture
+            fw = dx * ex * s;
+            fh = dy * ey * s;
+            why = CameraHook::EyeProj() && VRRuntime::Stereo() && fabsf(ex - 2.f * tanf(ox * 0.5f / 57.29578f)) > 1e-3f ? "headset, per eye" : "headset";
         }
         else
         {   // the game's own fov follows the window's aspect: keep the aspect, the horizontal at the eye's density. Only
@@ -265,12 +319,24 @@ void RenderRes::OnPresent(IDXGISwapChain* sc)
     if (!g_Hwnd) { DXGI_SWAP_CHAIN_DESC d{}; if (SUCCEEDED(sc->GetDesc(&d))) g_Hwnd = d.OutputWindow; if (!g_Hwnd) return; }
     {
         LARGE_INTEGER now, f; QueryPerformanceCounter(&now); QueryPerformanceFrequency(&f);
-        if (!g_FpsT.QuadPart) g_FpsT = now;
-        g_FpsN++;
-        const double dt = double(now.QuadPart - g_FpsT.QuadPart) / f.QuadPart;
-        if (dt >= 1.0) { g_Fps = (float)(g_FpsN / dt); g_FpsN = 0; g_FpsT = now; }
+        // Presents per second over the last 2 s (a ring of their times). It was a count restarted every second and
+        // read whenever the heartbeat was written, so one hitch in the current window showed as the rate (46.8 read
+        // against 55-62 Presents/s measured over 4 s in synchronised stereo).
+        static LARGE_INTEGER ring[512]; static int head = 0, count = 0;
+        ring[head] = now; head = (head + 1) % 512; if (count < 512) count++;
+        int n = 0; double span = 0;
+        for (int i = 1; i < count; i++)
+        {
+            const LARGE_INTEGER& t = ring[(head - 1 - i + 512) % 512];
+            const double age = double(now.QuadPart - t.QuadPart) / f.QuadPart;
+            if (age > 2.0) break;
+            n = i; span = age;
+        }
+        g_Fps = span > 0.25 ? (float)(n / span) : g_Fps;
+        (void)g_FpsT; (void)g_FpsN;
         DXGI_SWAP_CHAIN_DESC d{};
         if (SUCCEEDED(sc->GetDesc(&d))) { g_BufW = (int)d.BufferDesc.Width; g_BufH = (int)d.BufferDesc.Height; }
+        GpuTime(sc);
     }
 
     int w = 0, h = 0; std::string why;
@@ -304,9 +370,9 @@ std::string RenderRes::Status()
 {
     int rw = 0, rh = 0; RealClient(rw, rh);
     const int* ds = g_Base ? (const int*)(g_Base + kDisplaySize) : nullptr;
-    return fmt::format("renderres target {}x{} ({}) engine {}x{} buffers {}x{} window {}x{} scale {:.2f} rs {} fps {:.1f} applies {} spoofed {} bufs {} cfgguard {} placeguard {}",
+    return fmt::format("renderres target {}x{} ({}) engine {}x{} buffers {}x{} window {}x{} scale {:.2f} rs {} fps {:.1f} gpu {:.2f} ms applies {} spoofed {} bufs {} cfgguard {} placeguard {}",
                        g_TW.load(), g_TH.load(), g_Why, ds ? ds[0] : 0, ds ? ds[1] : 0, g_BufW, g_BufH, rw, rh, g_Scale.load(),
-                       CVars::GetInt("rs_enable", -1), g_Fps, g_Applies, g_Spoofed, g_Buffers, g_CfgGuards, g_PlaceGuards);
+                       CVars::GetInt("rs_enable", -1), g_Fps, g_GpuMs, g_Applies, g_Spoofed, g_Buffers, g_CfgGuards, g_PlaceGuards);
 }
 
 bool RenderRes::Command(const std::string& what, std::istringstream& ss)

@@ -189,7 +189,10 @@ Support the development: patreon.com/CosmicTangerine  -  ko-fi.com/cosmictangeri
                FocusGameWindow = 1 (the game is brought back to the front when you use the controllers)
    [Gameplay]  SwordGestures = 1   ThrowGestures = 1   GrabObjects = 1
    [Display]   Reticle = 0 (1 = the two pointing lines) WristHud = 1  WristHudSize = 8.5 (cm)
-               DisableMotionBlur = 1   Stereo3D = 0 (experimental)
+               DisableMetaASW = 1 (Link / Air Link: Meta's ASW off for this game, see section 7)
+               DisableMotionBlur = 1   Stereo3D = 1 (real depth, each eye drawn at the same instant,
+                                 about half the frame rate; 0 = flat, both eyes the same
+                                 picture; 2 = the old alternating 3D of version 1.0)
                RenderScale = 1 (sharpness: 1 = what the headset asks for, lower = faster)
                MenuScreen = 1   MenuScreenSize = 62 (deg wide)   MenuScreenDistance = 2.4 (m)
                MenuBackground = 0.22 (how bright the paused world is around the menu screen)
@@ -225,6 +228,10 @@ Support the development: patreon.com/CosmicTangerine  -  ko-fi.com/cosmictangeri
    - Open DishonoredVR.log in the game folder and look for "OpenXR session not started (...)":
      the text in brackets says why.
 
+ The game does not start at all on a PC with an AMD graphics card
+   - Dishonored 2 itself (also without the mod) fails to start on some AMD setups and needs a
+     replacement of its AMD AGS library (amd_ags_x64.dll). This is the game, not the mod.
+
  "Dishonored 2 VR is NOT active: this game build is not supported" at startup
    - Only the current Steam version of Dishonored 2 is supported (section 1).
 
@@ -251,7 +258,15 @@ Support the development: patreon.com/CosmicTangerine  -  ko-fi.com/cosmictangeri
 
  Low frame rate
    - Lower the resolution in SteamVR / the Meta Horizon app / Virtual Desktop, or set
-     DishonoredVR.ini > RenderScale = 0.8. Lower the game's graphics settings; keep Stereo3D = 0.
+     DishonoredVR.ini > RenderScale = 0.8. Lower the game's graphics settings. Stereo3D = 1
+     draws the world twice per frame (about half the frame rate): use 0 if it stutters.
+
+ Warped, "glitchy" edges around your hands or the world when you move fast
+   - Your headset's app is inventing frames because the game runs below the headset's refresh.
+     Meta (Link / Air Link): the mod turns ASW off for this game (DisableMetaASW = 1); if it is
+     still on, Ctrl+Numpad1 on the PC keyboard turns it off. SteamVR: Settings > Video > Per-
+     application video settings > Dishonored 2 > Motion Smoothing off. Virtual Desktop: its
+     streaming settings > SSW off. Pimax: Pimax Play > Smart Smoothing off.
 
  Menus too small / too big, or too close
    - DishonoredVR.ini > MenuScreenSize (degrees: 70 = bigger) and MenuScreenDistance.

@@ -315,6 +315,7 @@ captures in `local\shots\`. Many print which captures to look at before trusting
 | Area | Scripts | Covers |
 |---|---|---|
 | `aa` | `boot`, `mv`, `quality`, `robust` (+ `.py`) | per-eye TAA in stereo (motion vectors, jaggies, flicker, robustness) |
+| `stereo` | `motionall`, `jumps`, `soak`, `loadsave`, `servo`, `walk`, `simlog` (+ `.py`) | stereo modes in motion (disparity vs a still reference, eye timing), input in held frames, long soaks, loads |
 | `aids` | `boot` | load a save with god mode and the testing aids |
 | `body` | `boot`, `seen`, `armposes`, `swim`, `statyaw`, `swimbattery` (+ `.py`) | what each eye sees (mock compositor), arm poses vs a real arm, world swim |
 | `cine` | `boot -Save altar\|ledge\|table\|skiff\|doctor\|market`, `cine`, `move`, `ride` | cutscenes, hard landing, mantle/slide, cutscenes that carry the player |
@@ -380,7 +381,7 @@ Arguments in `<>`. The value used when a number is omitted differs per command (
 | Area | Commands |
 |---|---|
 | Package | `vr auto 0\|1` (auto-activation), `vr weapon6dof 0\|1` (the whole VR package: weapons and hands on the controllers, head aim, body, reticle, fov auto), `vr body 0\|1`, `vr hands 0\|1`, `vr hidearms`, `vr hidebody` |
-| View / render | `vr stereo 0\|1` (alternating eyes), `vr stereotaa 0\|1\|2` (0 TAA off in stereo, 1 per-eye TAA, 2 shared history), `vr fov auto [margin] \| off \| <x> <y>`, `vr ortho 0\|1`, `vr rendersize auto\|off\|<w> <h>`, `vr renderscale <s>` (0 = off), `vr renderres` (status), `vr window <w> <h>\|off`, `vr recenter`, `vr headaim 0\|1`, `vr vm 0\|1` (view matrix hook) |
+| View / render | `vr stereo 0\|1\|2` (mono, alternating eyes, synchronised), `vr eyeproj 0\|1\|2 [margin]` (per-eye frustum), `vr layerfov 0\|1`, `vr stereohealth 0\|1`, `vr simlog <n>` (frames to DVR_simlog.txt), `vr syncdbg <mask>` (64 input read on held frames, 256 no pair staged, 512 no gate), `vr stereotaa 0\|1\|2` (0 TAA off in stereo, 1 per-eye TAA, 2 shared history), `vr fov auto [margin] \| off \| <x> <y>`, `vr ortho 0\|1`, `vr rendersize auto\|off\|<w> <h>`, `vr renderscale <s>` (0 = off), `vr renderres` (status), `vr window <w> <h>\|off`, `vr recenter`, `vr headaim 0\|1`, `vr vm 0\|1` (view matrix hook) |
 | Scripted views | `vr animcam 0\|1\|2`, `vr animstate <State> <mask>`, `vr cinebars`, `vr cinearms`, `vr cinetrack`, `vr cinevehicle`, `vr cinecut <m> <deg>`, `vr cinecontrols` |
 | Controls | `vr kbm 0\|1`, `vr menuinput 0\|1` (default 0: controllers do not drive game menus), `vr snap <deg>` (0 = smooth turn), `vr turnspeed <deg/s>`, `vr quickslots 0\|1`, `vr quickkeys <keys>`, `vr quickhold <s>`, `vr potions`, `vr autofocus 0\|1`, `vr scenemenus 0\|1`, `vr tapkey <KEY> [ms]` (a key sent the controllers' way), `vr mcal auto\|<counts/deg>`, `vr meleekey <vk>`, `vr buzz <hand> <amp> <s>` |
 | Hands / body | `vr weapongrip 0\|1\|2\|forget\|forgetall`, `vr handrest <mode> [curl] [grip] \| forget`, `vr armlen <m>`, `vr armsolve 0\|1`, `vr pivotfix`, `vr carryarm`, `vr armforeign`, `vr handaxes 0\|1` (draws the palm and controller frames into the image) |
@@ -431,6 +432,7 @@ most:
 |---|---|
 | `xr_init`, `xr_running`, `xr_state`, `xr_frames`, `xr_runtime`, `xr_error`, `xr_stereo` | the OpenXR session |
 | `renderres ...`, `stereotaa ...`, `screen ...`, `watchdog ...` | render size, per-eye TAA, menu screen, stalls |
+| `xr_stereo 1 mode 2 synchronised`, `stereosync ...`, `syncstereo ...`, `predict ...` | stereo mode; pairs held, gate state and why it is shut; pairs staged / submitted; pose prediction |
 | `cam_pos`, `cam_fwd` | the game's camera (a load or a crash back to the logos shows here) |
 | `kbm_ticks ...` | `sim` (is the game simulating), `mode play\|menu\|wheel`, `fpdraws`, `yawerr`/`pitcherr` (head-aim servo error), `menusafe`, `held` keys |
 | `gpu6dof`, `gpu6dof_weapondraws entity L n R n`, `gpuhands`, `gpubody` | weapon and arm identification (`fulldraws`, `readopt`, `palmiss`) |
@@ -576,6 +578,6 @@ These must be parameterised before publishing (as of this writing):
 - `scripts\deploy.ps1`, `undeploy.ps1`, `run-test.ps1` default `-GameDir` to the default Steam folder;
   `scripts\testing\Play.ps1` hard-codes it.
 - `scripts\build.ps1`, `build-mockxr.ps1` and `package.ps1` look for CMake / `dumpbin` under the VS 2022 **Build Tools**
-  install path; `build.ps1` falls back to a sibling `..\prey-vr` vcpkg.
+  install path.
 - `Play.ps1` and `release\quickboot.ps1` assume Meta's runtime manifest at its default install path.
 - `tools\make_seeds.py` and `tools\xref.py` default to the Steam game path.

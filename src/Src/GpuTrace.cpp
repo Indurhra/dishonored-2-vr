@@ -561,7 +561,7 @@ namespace
     void* g_AnchoredEnt[2] = {};                     // the equipment entity each hand's rest pose belongs to
     bool g_XfValid = false, g_XfPrevValid = false, g_ViewValid = false;
     float g_XfViewMat[16] = {};                // the view matrix of g_XfSerial (vr aaxf: is it the moved draw's own view?)
-    std::atomic<unsigned long long> g_XfSame{ 0 }, g_XfOther{ 0 }, g_XfUnknown{ 0 };
+    std::atomic<unsigned long long> g_XfSame{ 0 }, g_XfOther{ 0 }, g_XfUnknown{ 0 }, g_XfLag[4];
     // Anchor. The reference the weapon is moved FROM is the equipment entity's own world transform, read fresh
     // every frame (BodyHide::GetAnchors) -- not a snapshot of where the model was when calibrated. Three things
     // that cost whole sessions all come from taking a snapshot:
@@ -595,6 +595,18 @@ namespace
     std::mutex g_ProjM;
     std::atomic<int> g_ProjAny{ 0 };            // research: 1 = the old behaviour (any factored draw publishes), for comparison
     float g_Proj[4][4] = {}; bool g_ProjValid = false; Rigid g_ProjView; unsigned long long g_ProjFrame = 0;
+    // ... and per main view (GpuTrace::ProjectForSerial): the last 4 views' projection and view, under g_ProjM
+    struct ProjRec { unsigned long long serial = 0, frame = 0; float P[4][4] = {}; Rigid view; };
+    ProjRec g_ProjRing[4];
+    thread_local unsigned long long t_ProjWant = 0;
+    std::atomic<unsigned long long> g_ProjForHit{ 0 }, g_ProjForMiss{ 0 };
+    void ProjRemember(unsigned long long serial, const float P[4][4], const Rigid& view, unsigned long long frame)
+    {   // (caller holds g_ProjM)
+        if (!serial) return;
+        ProjRec* slot = &g_ProjRing[0];
+        for (ProjRec& r : g_ProjRing) { if (r.serial == serial) { slot = &r; break; } if (r.serial < slot->serial) slot = &r; }
+        slot->serial = serial; slot->frame = frame; memcpy(slot->P, P, sizeof slot->P); slot->view = view;
+    }
     // Projection census (GpuTrace::RequestProjCensus): does the first-person body use the world's projection? id Tech
     // engines classically draw the view model with its own fov (renderView_t has an inhibitModelFovScale flag here),
     // which on a monitor makes the arms bigger and closer -- and in VR puts them somewhere the real arms are not.
@@ -1012,10 +1024,14 @@ namespace
 
     //! Refresh the frame's transform, keyed on the view serial so the hand pose and the view it is expressed in
     //! always come from the same frame. Whichever recording thread reaches the weapon first does the work.
+    std::atomic<bool> g_HandsFromView{ true };
+    std::atomic<unsigned long long> g_XfFromView{ 0 }, g_XfLatest{ 0 };
     bool EnsureTransform()
     {
-        float vm[16], vorg[3], vaxis[9]; unsigned long long serial = 0;
-        if (!ViewMatrixHook::RenderView(vm, vorg, vaxis, &serial)) { g_XfNoView++; return false; }
+        float vm[16], vorg[3], vaxis[9], haxis[9]; unsigned long long serial = 0;
+        // (vaxis: the axis the view was rendered with -- the basis the MVPs live in; haxis: the head's, without a stereo
+        // eye's turn or cant -- the yaw the controllers are carried into the world with, the same for both eyes)
+        if (!ViewMatrixHook::RenderView(vm, vorg, vaxis, &serial, haxis)) { g_XfNoView++; return false; }
         { std::lock_guard lk(g_XfM); if (serial == g_XfSerial) return g_XfValid; }
 
         // The view basis the factorisation recovers: x = clip x = right, y = clip y = up, z = depth = forward.
@@ -1040,16 +1056,22 @@ namespace
         const ViewMatrixHook::XrPose viewRec = ViewMatrixHook::RenderPoseXr(serial);
         const int eye = viewRec.valid ? viewRec.eye : VRRuntime::CurrentEye();
         VRRuntime::HeadPose hp = eye >= 0 ? VRRuntime::GetEyePose(eye) : VRRuntime::GetHeadPose();
+        // ... and the poses that view was BUILT from (head, eyes, controllers, located for when it is shown): both eyes of
+        // a synchronised pair draw the hands from one instant; the latest located ones differed eye to eye (vr handsfromview)
+        VRRuntime::PoseSet vset;
+        const bool fromView = g_HandsFromView.load() && ViewMatrixHook::ViewPoses(serial, vset) && vset.inputValid;
+        if (fromView) { hp = eye >= 0 ? vset.eye[eye] : vset.head; g_XfFromView++; } else g_XfLatest++;
         const bool prevSameEye = eye >= 0 && g_PrevPerEye.load() && StereoTaa::PrevIsSameEye(vm);
         Rigid hw[2];                                // controller poses in world space; columns = fwd/left/up
         bool haveHand[2] = {};
         for (int h = 0; h < 2; h++)
         {
-            float horg[3], haxis[9];
-            if (!hp.valid || !HandAimHook::ControllerPoseAt(h, vorg, vaxis, hp.pos, horg, haxis)) continue;
+            float horg[3], hxaxis[9];
+            if (!hp.valid || !HandAimHook::ControllerPoseAt(h, vorg, haxis, hp.pos, horg, hxaxis, fromView ? &vset.input : nullptr,
+                                                            fromView ? vset.head.quat : nullptr)) continue;
             haveHand[h] = true;
             for (int i = 0; i < 3; i++)
-            { hw[h].r[i * 3] = haxis[i]; hw[h].r[i * 3 + 1] = haxis[3 + i]; hw[h].r[i * 3 + 2] = haxis[6 + i]; hw[h].t[i] = horg[i]; }
+            { hw[h].r[i * 3] = hxaxis[i]; hw[h].r[i * 3 + 1] = hxaxis[3 + i]; hw[h].r[i * 3 + 2] = hxaxis[6 + i]; hw[h].t[i] = horg[i]; }
         }
         if (!haveHand[0] && !haveHand[1]) g_XfNoHand++;
 
@@ -1084,14 +1106,14 @@ namespace
                 o.r[0] = c; o.r[1] = -s; o.r[2] = 0; o.r[3] = s; o.r[4] = c; o.r[5] = 0; o.r[6] = 0; o.r[7] = 0; o.r[8] = 1;
                 memcpy(o.t, org, 12); };
             float headOrg[3]; memcpy(headOrg, vorg, 12);
-            VRRuntime::HeadPose head = VRRuntime::GetHeadPose();
+            VRRuntime::HeadPose head = fromView ? vset.head : VRRuntime::GetHeadPose();
             if (hp.valid && head.valid)
             {
                 const float d[3] = { head.pos[0] - hp.pos[0], head.pos[1] - hp.pos[1], head.pos[2] - hp.pos[2] };
-                float dw[3]; HandAimHook::XrOffsetToWorld(d, vaxis, dw);
+                float dw[3]; HandAimHook::XrOffsetToWorld(d, haxis, dw, fromView ? vset.head.quat : nullptr);
                 for (int i = 0; i < 3; i++) headOrg[i] += dw[i];
             }
-            yawFrame(headOrg, vaxis, g_BodyVr);
+            yawFrame(headOrg, haxis, g_BodyVr);
             g_BodyValid = g_GameCamValid;
             if (g_BodyValid) { Rigid bg; yawFrame(g_GameCam, g_GameCamAxis, bg); g_BodyDelta = Mul(g_BodyVr, Inv(bg)); }
         }
@@ -1259,7 +1281,7 @@ namespace
         for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 1099511628211ull; h ^= h >> 29; }
         return h;
     }
-    thread_local float t_DrawProj[4][4]; thread_local Rigid t_DrawProjView; thread_local bool t_DrawProjValid = false;
+    thread_local float t_DrawProj[4][4]; thread_local Rigid t_DrawProjView; thread_local bool t_DrawProjValid = false; thread_local unsigned long long t_DrawProjSerial = 0;
     bool TransformInstanceCb(ID3D11DeviceContext* ctx, const InstLayout* L, const float* in, UINT bytes, float* out, bool byIndex, UINT draw, ArmInfo* ai = nullptr)
     {
         t_DrawProjValid = false;
@@ -1304,7 +1326,7 @@ namespace
         if (diag > 0 && g_DiagLeft.fetch_sub(1) > 0) LogDraw(L, in, f);
         if (!f.ok) { g_FactorFail++; return false; }
         // this draw's projection, for the reticle if the draw turns out to be the player's (see g_Proj)
-        memcpy(t_DrawProj, f.p, sizeof t_DrawProj); t_DrawProjView = vw; t_DrawProjValid = true;
+        memcpy(t_DrawProj, f.p, sizeof t_DrawProj); t_DrawProjView = vw; t_DrawProjValid = true; t_DrawProjSerial = xfSerial;
         if (g_ProjAny.load())
         {
             std::lock_guard lk(g_ProjM);
@@ -3313,11 +3335,13 @@ namespace
             for (auto& e : g_CtxSer) if (e.k == c) { s = e.s; e.k = nullptr; e.s = 0; break; }
             if (SUCCEEDED(hr) && pp && *pp && s) { g_ListSer[g_ListNext] = { *pp, s }; g_ListNext = (g_ListNext + 1) % 64; }
         }
+        StereoTaa::OnFinishList(c, SUCCEEDED(hr) && pp ? *pp : nullptr);
         PipeTrace::Event(PipeTrace::Finish, (uint64_t)(uintptr_t)c & 0xFFFFF, s);
         return hr;
     }
-    void STDMETHODCALLTYPE HkExecCL(ID3D11DeviceContext* c, ID3D11CommandList* l, BOOL restore)
+    void NoteExecuted(ID3D11CommandList* l)
     {
+        StereoTaa::OnExecuteList(l);
         unsigned long long s = 0;
         {
             std::lock_guard lk(g_CtxSerM);
@@ -3325,8 +3349,10 @@ namespace
         }
         if (s) { g_ExecSerial = s; g_ExecFrame = g_PresentFrame; }
         PipeTrace::Event(PipeTrace::Execute, (uint64_t)(uintptr_t)l & 0xFFFFF, s);
-        g_RealExecCL(c, l, restore);
     }
+    void STDMETHODCALLTYPE HkExecCL(ID3D11DeviceContext* c, ID3D11CommandList* l, BOOL restore) { NoteExecuted(l); g_RealExecCL(c, l, restore); }
+    ExecCL_t g_RealExecCLMT = nullptr;   // the thread-safe immediate context's (see RehookImmediate)
+    void STDMETHODCALLTYPE HkExecCLMT(ID3D11DeviceContext* c, ID3D11CommandList* l, BOOL restore) { NoteExecuted(l); g_RealExecCLMT(c, l, restore); }
 
     //! Alternating-eye stereo with per-eye TAA: an entity's draw carries the previous MVP the engine cached from the
     //! last frame -- the OTHER eye's view (measured: arms, weapons, doors, props ~190 px of false motion with the head
@@ -3340,18 +3366,14 @@ namespace
         for (int i = 0; i < 4; i++) if (rows[i] < 0 || (UINT)(rows[i] + 4) * 4 > bytes) return false;
         bool same = true;   // first frame of an object: the engine's previous IS the current one (no motion), leave it
         for (int i = 0; i < 4 && same; i++) if (cur[i] >= 0 && (UINT)(cur[i] + 4) * 4 <= bytes) same = !memcmp(f + rows[i], f + cur[i], 16);
-        if (same) return false;
+        float pr[16], cr[16]; bool haveCur = true;
+        for (int i = 0; i < 4; i++) { memcpy(pr + i * 4, f + rows[i], 16); if (cur[i] < 0 || (UINT)(cur[i] + 4) * 4 > bytes) haveCur = false; else memcpy(cr + i * 4, f + cur[i], 16); }
+        // (the current rows and the engine's own previous are also kept for the draws of the next frame: vr aaprevrule)
         ID3D11Buffer* vcb = nullptr; ctx->VSGetConstantBuffers(1, 1, &vcb);
-        float C[16], pr[16], cr[16]; bool haveCur = true;
-        for (int i = 0; i < 4; i++) { memcpy(pr + i * 4, f + rows[i], 16); if (cur[i] < 0) haveCur = false; else memcpy(cr + i * 4, f + cur[i], 16); }
-        const bool ok = vcb && StereoTaa::PrevCorrection(ctx, vcb, C, pr, haveCur ? cr : nullptr);
+        const bool ok = vcb && StereoTaa::FixPrevRows(ctx, vcb, haveCur ? cr : nullptr, pr, same);
         if (vcb) vcb->Release();
         if (!ok) return false;
-        float in[4][4];
-        for (int i = 0; i < 4; i++) memcpy(in[i], f + rows[i], 16);
-        for (int i = 0; i < 4; i++)
-            for (int j = 0; j < 4; j++)
-                f[rows[i] + j] = C[i * 4] * in[0][j] + C[i * 4 + 1] * in[1][j] + C[i * 4 + 2] * in[2][j] + C[i * 4 + 3] * in[3][j];
+        for (int i = 0; i < 4; i++) memcpy(f + rows[i], pr + i * 4, 16);
         g_EyeFixed++;
         return true;
     }
@@ -3385,6 +3407,7 @@ namespace
         {   // a draw of the player's own arm / equipment: certainly the main view (see g_Proj)
             std::lock_guard lk(g_ProjM);
             memcpy(g_Proj, t_DrawProj, sizeof g_Proj); g_ProjView = t_DrawProjView; g_ProjValid = true; g_ProjFrame = g_PresentFrame;
+            ProjRemember(t_DrawProjSerial, t_DrawProj, t_DrawProjView, g_PresentFrame);
         }
         if (t_DrawProjValid && g_CensusLeft.load() > 0) CensusAdd(t_DrawProj, 0.f, true);
         if (!moved)
@@ -3407,17 +3430,17 @@ namespace
         if (ps == cur) { ctx->PSSetConstantBuffers(2, 1, &mine); sw.psOn = true; sw.ps = ps; }
         else if (ps) ps->Release();
         if (!moved) return;                                       // the eye correction alone: no arm, no palettes
-        {   // research (heartbeat stereotaa line): was this moved draw placed with ITS OWN view's transform?
+        {   // research (heartbeat stereotaa line): was this moved draw placed with ITS OWN view's transform? Its view is the
+            // one its PerViewCB holds (learned here, shadowed from then on); `lag` = how many views older than the one the
+            // transform was built from.
             ID3D11Buffer* vcb = nullptr; ctx->VSGetConstantBuffers(1, 1, &vcb);
-            float dm[16], xm[16];
-            if (vcb && StereoTaa::ViewMatrixOf(ctx, vcb, dm))
-            {
-                { std::lock_guard lk(g_XfM); memcpy(xm, g_XfViewMat, 64); }
-                float e0 = 0, e1 = 0;
-                for (int i = 0; i < 16; i++) { e0 = std::max(e0, fabsf(dm[i] - xm[i])); e1 = std::max(e1, fabsf(dm[i] - xm[(i % 4) * 4 + i / 4])); }
-                (std::min(e0, e1) < 1e-4f ? g_XfSame : g_XfOther)++;
-            }
-            else g_XfUnknown++;
+            if (vcb) StereoTaa::LearnViewCb(vcb);
+            float dm[16];
+            unsigned long long xs = 0; { std::lock_guard lk(g_XfM); xs = g_XfSerial; }
+            const unsigned long long ds = vcb && StereoTaa::ViewMatrixOf(ctx, vcb, dm) ? ViewMatrixHook::SerialOfViewMatrix(dm) : 0;
+            if (!ds) g_XfUnknown++;
+            else if (ds == xs) g_XfSame++;
+            else { g_XfOther++; const unsigned long long lag = xs > ds ? xs - ds : 0; g_XfLag[lag < 3 ? lag : 3]++; }
             if (vcb) vcb->Release();
         }
         g_Patched++;
@@ -3586,7 +3609,9 @@ namespace
         return false;
     }
 
-    template <int KIND>
+    //! VARIANT: a second set of the same hooks (own trampolines) for another implementation of the same context kind --
+    //! the immediate context's thread-safe one, which D3D11 switches to once multithread protection is on (Hooks<0, 1>).
+    template <int KIND, int VARIANT = 0>
     struct Hooks
     {
         static inline DrawIndexed_t  realDrawIndexed = nullptr;
@@ -3744,7 +3769,7 @@ namespace
             realCopyRegion          = isTaken(vt[kCopyRegionSlot]) ? nullptr : (CopyRegion_t)vt[kCopyRegionSlot];
             realCopy                = isTaken(vt[kCopySlot]) ? nullptr : (Copy_t)vt[kCopySlot];
             // every entry checked first (Hookable): one Detours cannot follow is left alone instead of crashing the game
-            const char* kind = KIND ? "deferred" : "immediate";
+            const char* kind = KIND ? "deferred" : VARIANT ? "immediate (thread-safe)" : "immediate";
             auto ok = [&](auto& real, const char* name) -> bool
             {
                 if (!real) return false;
@@ -3774,6 +3799,13 @@ namespace
     };
     using Imm = Hooks<0>;
     using Def = Hooks<1>;
+    using ImmMT = Hooks<0, 1>;
+    // every context slot the hooks cover (draws, Map/Unmap/UpdateSubresource, dispatches, copies, ExecuteCommandList), and
+    // every function already detoured in them (RehookImmediate)
+    constexpr int kHookedImmSlots[] = { 12, 13, 20, 21, 39, 40, kMapSlot, kUnmapSlot, kUpdateSubSlot, kDispatchSlot, kDispatchIndSlot,
+                                        kCopyRegionSlot, kCopySlot, 58 };
+    std::vector<void*> g_HookedFns;
+    bool g_ImmMTHooked = false;
     bool g_Installed = false;
 
     // --- stage 4: read the shader instead of guessing which constants matter ---
@@ -4336,9 +4368,39 @@ bool GpuTrace::Install(IDXGISwapChain* sc)
     LONG r = DetourTransactionCommit();
     g_Installed = (r == NO_ERROR);
     g_Stats.installed = g_Installed;
+    if (vtImm) for (int s : kHookedImmSlots) g_HookedFns.push_back(vtImm[s]);
+    if (vtDef) for (int s : kHookedImmSlots) g_HookedFns.push_back(vtDef[s]);
     LOGI("GpuTrace: immediate vt={} [{}] ({} hooks), deferred vt={} [{}] ({} hooks), detour={}",
          (void*)vtImm, vtImm ? ModuleOf(vtImm) : "-", nImm, (void*)vtDef, vtDef ? ModuleOf(vtDef) : "-", nDef, r);
     return g_Installed;
+}
+
+//! The immediate context changes implementation when multithread protection is switched on (XRSession does, for the
+//! keep-alive frames): D3D11 then calls a thread-safe set of functions that never reach the hooks put
+//! on the first set. Measured 2026-10-23: from then on no ExecuteCommandList and no write of the TAA's PerViewCB was
+//! seen -- the presented image was named one view late (the stereo eyes swapped) and per-eye TAA fell back to off.
+//! Checked every Present (a few compares): a set of functions not hooked yet gets its own hooks (Hooks<0, 1>).
+void GpuTrace::RehookImmediate()
+{
+    if (!g_Installed || !g_Immediate || g_ImmMTHooked) return;
+    void** vt = *(void***)g_Immediate;
+    if (!vt) return;
+    bool fresh = false;
+    for (int s : kHookedImmSlots)
+        if (std::find(g_HookedFns.begin(), g_HookedFns.end(), vt[s]) == g_HookedFns.end()) { fresh = true; break; }
+    if (!fresh) return;
+    g_ImmMTHooked = true;      // one attempt: a third implementation is logged by the next check's absence of effect
+    std::vector<void*> taken = g_HookedFns;
+    DetourTransactionBegin();
+    DetourUpdateThread(GetCurrentThread());
+    const int n = ImmMT::Attach(vt, taken.data(), (int)taken.size());
+    bool exec = false;
+    if (std::find(taken.begin(), taken.end(), vt[58]) == taken.end() && Hookable(vt[58], "immediate (thread-safe) ExecuteCommandList"))
+    { g_RealExecCLMT = (ExecCL_t)vt[58]; DetourAttach(&(PVOID&)g_RealExecCLMT, HkExecCLMT); exec = true; }
+    const LONG r = DetourTransactionCommit();
+    for (int s : kHookedImmSlots) g_HookedFns.push_back(vt[s]);
+    LOGI("GpuTrace: the immediate context switched implementation (multithread protection): vt={} [{}], {} hooks + ExecuteCommandList {} added, detour={}",
+         (void*)vt, ModuleOf(vt), n, exec ? 1 : 0, r);
 }
 
 void GpuTrace::Uninstall()
@@ -4555,6 +4617,7 @@ namespace
 
 void GpuTrace::OnPresent()
 {
+    RehookImmediate();
     if (g_CapturedVS) { DumpShader(g_CapturedVS); g_CapturedVS = nullptr; }
     FlushConstantDump();
     CreatePools();          // on one thread, outside any draw: never create resources inside the draw hook
@@ -4806,7 +4869,7 @@ void GpuTrace::RequestHandRelLog(int lines) { g_RelLogLeft = lines > 0 ? lines :
 void GpuTrace::HandTrace(int frames, int every) { g_TraceEvery = every > 0 ? every : 6; g_TraceLeft = frames > 0 ? frames : 0; LOGI("handtrace: {} frames, a line every {}", frames, g_TraceEvery.load()); }
 void GpuTrace::SetPrevPerEye(bool on) { g_PrevPerEye = on; }
 unsigned long long GpuTrace::EyeFixedDraws() { return g_EyeFixed.load(); }
-std::string GpuTrace::XfViewStats() { return fmt::format("moved draws placed with their own view {} another view {} unknown {}", g_XfSame.load(), g_XfOther.load(), g_XfUnknown.load()); }
+std::string GpuTrace::XfViewStats() { return fmt::format("moved draws placed with their own view {} another view {} (older by 0:{} 1:{} 2:{} 3+:{}) unknown {}", g_XfSame.load(), g_XfOther.load(), g_XfLag[0].load(), g_XfLag[1].load(), g_XfLag[2].load(), g_XfLag[3].load(), g_XfUnknown.load()); }
 void GpuTrace::SetArmForeign(int on) { g_ArmForeignOn = on; if (!on) g_ArmForeignUntil = 0; LOGI("armforeign: {}", on ? "no arm analysis while the arms are the game's (Shadow Walk, takedowns)" : "OLD: the arm meshes are analysed during Shadow Walk too"); }
 void GpuTrace::SetWeaponGrip(int mode) { g_GripMode = mode; LOGI("weapongrip: mode {} ({})", mode, mode == 1 ? "the learned grip, always" : mode == 2 ? "learn only, the animation drawn" : "the animation; crouched, the standing hold (old)"); }
 void GpuTrace::WeaponGripForget(bool file)
@@ -5252,14 +5315,26 @@ std::string GpuTrace::HandStats()
 //! factored recently. `depth` comes back as the view-space distance along the forward axis, so a caller can size a
 //! marker by range.
 void GpuTrace::SetProjAny(int on) { g_ProjAny = on; LOGI("GpuTrace: reticle projection from {}", on ? "ANY factored draw (old)" : "the player's own draws"); }
+namespace
+{
+    //! The projection and view ProjectWorld / UnprojectNdc use on this thread (see GpuTrace::ProjectForSerial).
+    bool ProjFor(float P[4][4], Rigid& view)
+    {
+        std::lock_guard lk(g_ProjM);
+        if (t_ProjWant)
+            for (const ProjRec& r : g_ProjRing)
+                if (r.serial == t_ProjWant && g_PresentFrame - r.frame <= 4) { memcpy(P, r.P, sizeof r.P); view = r.view; g_ProjForHit++; return true; }
+        if (t_ProjWant) g_ProjForMiss++;
+        if (!g_ProjValid || g_PresentFrame - g_ProjFrame > 4) return false;
+        memcpy(P, g_Proj, sizeof g_Proj); view = g_ProjView;
+        return true;
+    }
+}
+void GpuTrace::ProjectForSerial(unsigned long long serial) { t_ProjWant = serial; }
 bool GpuTrace::ProjectWorld(const float w[3], float ndc[2], float* depth)
 {
     float P[4][4]; Rigid vwLocal;
-    {
-        std::lock_guard lk(g_ProjM);
-        if (!g_ProjValid || g_PresentFrame - g_ProjFrame > 4) return false;
-        memcpy(P, g_Proj, sizeof P); vwLocal = g_ProjView;
-    }
+    if (!ProjFor(P, vwLocal)) return false;
     // world -> view, then clip.i = dot(P_row_i, view4)
     float v[4] = { 0, 0, 0, 1 };
     for (int i = 0; i < 3; i++)
@@ -5275,11 +5350,7 @@ bool GpuTrace::ProjectWorld(const float w[3], float ndc[2], float* depth)
 bool GpuTrace::UnprojectNdc(const float ndc[2], float org[3], float dir[3])
 {
     float P[4][4]; Rigid vwLocal;
-    {
-        std::lock_guard lk(g_ProjM);
-        if (!g_ProjValid || g_PresentFrame - g_ProjFrame > 4) return false;
-        memcpy(P, g_Proj, sizeof P); vwLocal = g_ProjView;
-    }
+    if (!ProjFor(P, vwLocal)) return false;
     // a direction d (w = 0) with d.z = 1 projects to ndc when P0.d = ndc.x * P3.d and P1.d = ndc.y * P3.d
     const float a = P[0][0] - ndc[0] * P[3][0], b = P[0][1] - ndc[0] * P[3][1], c = -(P[0][2] - ndc[0] * P[3][2]);
     const float d = P[1][0] - ndc[1] * P[3][0], e = P[1][1] - ndc[1] * P[3][1], f = -(P[1][2] - ndc[1] * P[3][2]);
@@ -5387,6 +5458,8 @@ bool GpuTrace::GetRenderView(float r[9], float t[3], float org[3])
     memcpy(r, g_ViewRigid.r, 36); memcpy(t, g_ViewRigid.t, 12); memcpy(org, g_ViewInv.t, 12);
     return true;
 }
+bool GpuTrace::HandsFromView() { return g_HandsFromView.load(); }
+void GpuTrace::SetHandsFromView(bool on) { g_HandsFromView = on; LOGI("GpuTrace: hands drawn from {} (transforms so far: from the view {}, latest {})", on ? "the poses their view was built from" : "the latest located poses (before)", g_XfFromView.load(), g_XfLatest.load()); }
 bool GpuTrace::ExecutedViewSerial(unsigned long long& serial, unsigned long long& age)
 {
     serial = g_ExecSerial.load(); age = g_PresentFrame - g_ExecFrame.load();

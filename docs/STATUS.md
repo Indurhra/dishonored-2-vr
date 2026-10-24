@@ -1,7 +1,7 @@
 # Dishonored 2 VR: feature status
 
 What works, how well it has been checked, and what is known to be broken or still open, by feature area. It covers
-the 1.0.0 release.
+the 0.5.0 release (beta).
 
 Where this comes from: the development log of every feature, the engine notes in [ENGINE.md](ENGINE.md), the
 player [README](../package/README.txt) and the shipped [DishonoredVR.ini](../package/DishonoredVR.ini). When this file
@@ -62,7 +62,8 @@ headset.
 | Picture drawn at its true angles in each eye (orthoscopic, not stretched), with the real render pose declared to the compositor | Done | Played (Q3) | In the mock the stretch is 1.000 / 1.000 (before: 0.763 / 1.052). World swim fell from 0.87 / 2.92 deg to 0.12 / 0.25 deg. |
 | Field of view covering the whole eye (`vr fov auto`; 108x110 deg on a Quest 3) | Done | Played (Q3); the "mode" fix is Mock | Applied as soon as the headset reports its fov, and again if the fov changes. Before 0.2.0 it was lost when VR started before the fov arrived. Capped at 150 deg per axis. |
 | Render resolution follows the headset, not the PC window (`RenderScale`) | Done | Played (Q3) | Quest 3 default 2266x2348. About 4x the pixels of 0.1.0: 37-80 fps on the RTX 3060 laptop. Lower the resolution in the headset's PC app or set `RenderScale` < 1. Capped at 4096 per side and 16 MP (Mock). The game's dynamic resolution is held off while in VR. The game's own config file is never changed. |
-| Stereo 3D, alternating eyes (`Stereo3D`) | Experimental, off | Played (Q3) | Real depth, but each eye refreshes at half the frame rate. At about 40 fps on the Quest it felt clearly worse (judder, depth shimmer). Kept off by default. |
+| Stereo 3D, synchronised (`Stereo3D = 1`, `vr stereo 2`) | Done, on by default | Played (Q3) | Both eyes rendered from the same world instant (every second game frame held, Draw only) and submitted together; per-eye frustum and TAA. About half the frame rate. |
+| Stereo 3D, alternating eyes (`Stereo3D = 2`, `vr stereo 1`; was `Stereo3D = 1` in 1.0) | Off | Played (Q3) | Real depth, but each eye refreshes at half the frame rate and sees another instant. At about 40 fps on the Quest it felt clearly worse (judder, depth shimmer). |
 | Per-eye temporal anti-aliasing in stereo (`vr stereotaa`) | Done | Mock; tried briefly on the Q3 with no verdict | Each eye gets its own TAA history and previous matrices. Mock: motion vectors 17 px -> 0.03 px (same as mono). Open issues in section 3. |
 | Camera motion blur off (`DisableMotionBlur`) | Default | Code only | It also unticks the option in the game's own settings, and it stays off afterwards. |
 | Player body (torso and legs) hidden; only the arms are drawn | Default | Validated (Q3) | Always on in VR. |
@@ -225,6 +226,7 @@ headset.
 | `Reticle` (default 0): two pointing lines, a ring where shots land | Done, off | Mock | |
 | Developer console (`vr ...` commands), `DVR_autoexec.txt`, status file `DVR_heartbeat.txt` (`WriteStatusFile`) | Tools | - | Press Insert to open the overlay. |
 
+**Release 0.5.0 configuration:** synchronised 3D (`Stereo3D = 1`), `DisableMetaASW = 1`, otherwise as 1.0.0.
 **Release 1.0.0 configuration:** mono (`Stereo3D = 0`), `UnlockEverything = 1`, `InfiniteMana = 1`,
 `InfiniteAmmo = 0`, `InfiniteHealth = 0`, `Reticle = 0`, `WristHud = 1`, `FocusGameWindow = 1`, `RenderScale = 1`,
 `MenuScreen = 1`, `KeepAliveFrames = 1`, `NewSessionAfter = 5`.
@@ -333,6 +335,22 @@ From the latest open items and the roadmap. None of it is scheduled.
 ## 5. Changelog
 
 No git tags exist. Versions come from `src/CMakeLists.txt`, the package script and the session log.
+
+### 0.5.0 (beta, replaces 1.0.0)
+Version numbering reset: 1.0.0 was labelled too early. 0.5.0 is NEWER than 1.0.0 and replaces it; the mod stays in
+beta until it has been played on more headsets and runtimes.
+
+- Real 3D, now ON by default (`Stereo3D = 1`; 0 = flat): both eyes are drawn from the same instant of the game (the game's simulation is held for
+  the second eye), so depth stays steady while moving; 1.0's alternating 3D (`Stereo3D = 2`) made depth shimmer.
+- Each eye renders only its own field of view (about 20% fewer pixels in 3D) and its own anti-aliasing history with
+  the right motion of every object; the headset gets each picture with the head pose it was predicted for.
+- Fixed from 1.0: in 3D the two eyes could be swapped and the per-eye anti-aliasing silently switched itself off;
+  the picture's head pose was one frame late. Opening the pause menu at the wrong instant no longer crashes 3D.
+- `DisableMetaASW = 1`: Meta's ASW is turned off for this game on Link / Air Link (it warped the edges of moving hands
+  and of the world on fast head turns). Other runtimes are not touched; the README says where their smoothing is.
+- Canted displays (Pimax): the head's orientation comes from the headset's view space and each eye keeps its own.
+- A play state that draws no arms (such as climbing the tutorial's chain) is no longer read as a menu once the player
+  has been seen playing (not yet checked on the chain itself).
 
 ### 1.0.0 (public release)
 - Crash entering the Clockwork Mansion fixed (entity lookup during a level change).

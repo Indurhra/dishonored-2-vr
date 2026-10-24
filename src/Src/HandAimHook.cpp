@@ -69,10 +69,13 @@ namespace
     //! `eyePosXr` (optional) is the XR-space position the caller's anchor was built from; without it the offset is
     //! taken from the head midpoint, which is what the game camera corresponds to.
     bool CtrlPose(int hand, const float eyeOrg[3], const float viewAxis[9], float org[3], float axis[9],
-                  const float* eyePosXr = nullptr)
+                  const float* eyePosXr = nullptr, const XRInputState* given = nullptr, const float* headQuat = nullptr)
     {
-        XRInputState in; if (!VRRuntime::GetInput(in) || !in.hand[hand].valid) return false;
+        XRInputState in;
+        if (given) in = *given; else if (!VRRuntime::GetInput(in)) return false;
+        if (!in.hand[hand].valid) return false;
         VRRuntime::HeadPose hp = VRRuntime::GetHeadPose(); if (!hp.valid) return false;
+        if (headQuat) memcpy(hp.quat, headQuat, 16);
         const float* ref = eyePosXr ? eyePosXr : hp.pos;
         float q[4] = { in.hand[hand].quatX, in.hand[hand].quatY, in.hand[hand].quatZ, in.hand[hand].quatW };
         float d[3] = { in.hand[hand].posX - ref[0], in.hand[hand].posY - ref[1], in.hand[hand].posZ - ref[2] };
@@ -89,12 +92,13 @@ namespace
     }
     //! An XR-space displacement into the world, the same way CtrlPose places the controller: HMD yaw removed when the
     //! game yaw already tracks it, then XR->id axes, then the view's yaw. Used for head-minus-eye offsets.
-    void XrOffsetToWorldImpl(const float dXr[3], const float viewAxis[9], float out[3])
+    void XrOffsetToWorldImpl(const float dXr[3], const float viewAxis[9], float out[3], const float* headQuat = nullptr)
     {
         float d[3] = { dXr[0], dXr[1], dXr[2] };
         if (KbmInject::HeadAim())
         {
             VRRuntime::HeadPose hp = VRRuntime::GetHeadPose();
+            if (headQuat) { memcpy(hp.quat, headQuat, 16); hp.valid = true; }
             if (hp.valid) { float yaw = XrYaw(hp.quat); float c = cosf(-yaw), s = sinf(-yaw); float dx = d[0] * c + d[2] * s, dz = -d[0] * s + d[2] * c; d[0] = dx; d[2] = dz; }
         }
         float yaw = atan2f(viewAxis[1], viewAxis[0]), cy = cosf(yaw), sy = sinf(yaw);
@@ -606,11 +610,11 @@ bool HandAimHook::ControllerPose(int hand, float org[3], float axis[9])
     return CtrlPose(hand, co, ca, org, axis);
 }
 bool HandAimHook::ControllerPoseAt(int hand, const float eyeOrg[3], const float viewAxis[9], const float eyePosXr[3],
-                                   float org[3], float axis[9])
+                                   float org[3], float axis[9], const XRInputState* in, const float* headQuat)
 {
-    return CtrlPose(hand, eyeOrg, viewAxis, org, axis, eyePosXr);
+    return CtrlPose(hand, eyeOrg, viewAxis, org, axis, eyePosXr, in, headQuat);
 }
-void HandAimHook::XrOffsetToWorld(const float dXr[3], const float viewAxis[9], float out[3]) { XrOffsetToWorldImpl(dXr, viewAxis, out); }
+void HandAimHook::XrOffsetToWorld(const float dXr[3], const float viewAxis[9], float out[3], const float* headQuat) { XrOffsetToWorldImpl(dXr, viewAxis, out, headQuat); }
 void* HandAimHook::CameraObject() { return g_Cam.load(); }
 void* HandAimHook::AimCpnt() { return g_AimCpnt.load(); }
 void HandAimHook::SetAimCpnt(void* p) { g_AimCpnt.store(p); }

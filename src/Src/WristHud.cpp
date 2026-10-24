@@ -596,9 +596,9 @@ void WristHud::OnXrFrame(XRSession& xr, bool inMenu)
         float c[3]; QRot(wq, off, c); for (int i = 0; i < 3; i++) c[i] += wp[i];
         const float nLocal[3] = { -1.f, 0.f, 0.f };
         float n[3]; QRot(wq, nLocal, n);
-        const XREyePose& e0 = xr.Eye(0); const XREyePose& e1 = xr.Eye(xr.EyeCount() > 1 ? 1 : 0);
-        const float eye[3] = { (e0.posX + e1.posX) * 0.5f, (e0.posY + e1.posY) * 0.5f, (e0.posZ + e1.posZ) * 0.5f };
-        const float hq[4] = { e0.quatX, e0.quatY, e0.quatZ, e0.quatW };
+        const XREyePose& hd = xr.Head();     // (the head's orientation, not the left eye's: canted displays)
+        const float eye[3] = { hd.posX, hd.posY, hd.posZ };
+        const float hq[4] = { hd.quatX, hd.quatY, hd.quatZ, hd.quatW };
         float v[3] = { eye[0] - c[0], eye[1] - c[1], eye[2] - c[2] };
         const float dist = sqrtf(Dot(v, v));
         if (dist > 1e-4f) for (float& x : v) x /= dist;

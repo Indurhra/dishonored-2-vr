@@ -214,14 +214,21 @@ namespace
 
     bool FovApply()
     {   // the smallest symmetric fov that covers both eyes' fov: the mono image is shown to both, and a stereo image is
-        // drawn into each eye at its own angles (XRSession::SetOrtho), so nothing either eye can see is left black
+        // drawn into each eye at its own angles (XRSession::SetOrtho), so nothing either eye can see is left black.
+        // The eyes' fovs are taken into the HEAD's frame (CameraHook::UnionTans): on canted displays each eye looks ~10
+        // deg out, and its native fov alone left a black wedge on the outside of each eye.
         float tx = 0, ty = 0;
-        for (int e = 0; e < 2; e++)
-        {
-            const VRRuntime::Placement pl = VRRuntime::GetPlacement(e);
-            tx = std::max({ tx, fabsf(tanf(pl.fov[0])), fabsf(tanf(pl.fov[1])) });
-            ty = std::max({ ty, fabsf(tanf(pl.fov[2])), fabsf(tanf(pl.fov[3])) });
-        }
+        CameraHook::Tans u;
+        if (CameraHook::UnionTans(u)) { tx = std::max(-u.l, u.r); ty = std::max(u.u, -u.d); }
+        // With the asymmetric matrix (per-eye frustum mode 2, research) each eye's view keeps this fov in its renderView:
+        // whatever the engine derives from it (culling) must cover that frustum too. (Mode 1 gives each eye's view its
+        // own fov in the projection builder's hook; this one is the mono views'.)
+        if (CameraHook::EyeProj() == 2 && VRRuntime::Stereo())
+            for (int e = 0; e < 2; e++)
+            {
+                CameraHook::Tans t;
+                if (CameraHook::EyeTans(e, t)) { tx = std::max({ tx, -t.l, t.r }); ty = std::max({ ty, t.u, -t.d }); }
+            }
         if (tx <= 0.f || ty <= 0.f || !std::isfinite(tx) || !std::isfinite(ty)) return false;
         const float m = g_FovMargin.load();
         // at most 150 deg a side: a very wide headset (Pimax) would otherwise ask the engine for a projection near
@@ -268,7 +275,7 @@ bool BodyView::Command(const std::string& what, std::istringstream& ss)
     }
     if (what == "pivotfix") { int m = 1; ss >> m; ViewMatrixHook::SetPivotFix(m != 0); return true; }
     if (what == "armlen") { float m = 0.56f, k = 0.f; ss >> m >> k; GpuTrace::SetArmLength(m, k); return true; }
-    if (what == "posesource") { int m = 2; ss >> m; VRRuntime::SetPoseSource(m); return true; }
+    if (what == "posesource") { int m = 4; ss >> m; VRRuntime::SetPoseSource(m); return true; }
     if (what == "pipetrace") { int n = 6; ss >> n; PipeTrace::Start(n); return true; }
     if (what == "handjit") { int n = 0; ss >> n; GpuTrace::RequestHandJit(n); LOGI("cmd vr handjit {}", n); return true; }
     if (what == "armsolve") { int m = 1; ss >> m; GpuTrace::SetArmSolve(m); return true; }

@@ -23,12 +23,15 @@ namespace
 constexpr uint32_t kEyeW = 1024, kEyeH = 1024;
 constexpr uint32_t kSwapImages = 2;
 
-// Optional HMD emulation: DVR_MockHmd.txt (cwd) = "w h fovL fovR fovU fovD"
+// Optional HMD emulation: DVR_MockHmd.txt (cwd) = "w h fovL fovR fovU fovD [cant]"
 // (fovs in degrees for the LEFT eye; the right eye is mirrored, as real HMDs
 // are). Lets the mock reproduce hardware geometry headless — e.g. Quest 3:
 // "1824 1968 -52 42 48 -50". Missing file = legacy 1024x1024 symmetric 90.
+// cant (degrees, optional): CANTED displays, as a Pimax without parallel projections: each eye's orientation is the
+// head's turned `cant` degrees OUT (left eye to the left, right eye to the right), its fov given in that turned frame.
 uint32_t gEyeW = kEyeW, gEyeH = kEyeH;
 float gFovDeg[4] = { -45.0f, 45.0f, 45.0f, -45.0f }; // L R U D, left eye
+float gCantDeg = 0.f;
 bool gHmdCfgRead = false;
 void ReadHmdConfig()
 {
@@ -43,6 +46,7 @@ void ReadHmdConfig()
     {
         gEyeW = w; gEyeH = h;
         gFovDeg[0] = l; gFovDeg[1] = r; gFovDeg[2] = u; gFovDeg[3] = d;
+        float c = 0.f; if (fscanf_s(f, "%f", &c) == 1) gCantDeg = c;
     }
     fclose(f);
 }
@@ -66,7 +70,7 @@ struct MockSwapchain
 // Single instance of everything.
 struct XrInstance_T { int _; } gInstance;
 struct XrSession_T { int _; } gSession;
-struct XrSpace_T { int _; } gSpace;
+struct XrSpace_T { int _; } gSpace, gViewSpace;   // LOCAL; VIEW (the head: xrLocateSpace gives its pose)
 
 ID3D11Device* gDevice = nullptr;
 
@@ -282,9 +286,9 @@ MOCK_FN Mock_xrDestroySession(XrSession)
     return XR_SUCCESS;
 }
 
-MOCK_FN Mock_xrCreateReferenceSpace(XrSession, const XrReferenceSpaceCreateInfo*, XrSpace* out)
+MOCK_FN Mock_xrCreateReferenceSpace(XrSession, const XrReferenceSpaceCreateInfo* ci, XrSpace* out)
 {
-    *out = (XrSpace)&gSpace; return XR_SUCCESS;
+    *out = (ci && ci->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_VIEW) ? (XrSpace)&gViewSpace : (XrSpace)&gSpace; return XR_SUCCESS;
 }
 MOCK_FN Mock_xrDestroySpace(XrSpace) { return XR_SUCCESS; }
 
@@ -492,6 +496,7 @@ MOCK_FN Mock_xrBeginFrame(XrSession, const XrFrameBeginInfo*) { StallGate(); ret
 // with the pixels no layer reaches painted dark blue (a real headset shows black there; blue tells "no image" from a
 // black image). DVR_seen_<tag>.txt has the numbers to annotate it with.
 XrPosef gLastViewPose[2] = { { { 0, 0, 0, 1 }, { 0, 0, 0 } }, { { 0, 0, 0, 1 }, { 0, 0, 0 } } };
+void HeadViewsAt(int64_t t, XrView* views, bool recenter, XrPosef* head = nullptr);   // the head at a display time (below)
 // q^-1 * v * q etc. -- small quaternion helpers for the compositor
 void QRot(const XrQuaternionf& q, const float v[3], float o[3])
 {   // o = q v q*
@@ -562,7 +567,10 @@ void Compose(const XrFrameEndInfo* fei, const char* tag, bool worldFixed)
     for (int eye = 0; eye < 2; eye++)
     {
         const XrFovf ef = EyeFov(eye);
+        // where the eye IS when this frame is shown: the head at the frame's display time (the last located pose was
+        // this before the app could locate for other times; a prediction must be judged against the display time)
         XrPosef ep = gLastViewPose[eye];
+        { XrView hv[2] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } }; HeadViewsAt(fei->displayTime > 0 ? (int64_t)fei->displayTime : gLastDisplay, hv, false); ep = hv[eye].pose; }
         if (worldFixed) ep.orientation = { 0, 0, 0, 1 };
         snprintf(b, sizeof b, "eye %d fov %.4f %.4f %.4f %.4f pose q %.5f %.5f %.5f %.5f p %.4f %.4f %.4f\n", eye,
                  ef.angleLeft * r2d, ef.angleRight * r2d, ef.angleUp * r2d, ef.angleDown * r2d,
@@ -781,15 +789,31 @@ float gInHeadSway = 0, gInHandJit = 0;
 //             known speed, so image measurements taken at different moments compare (headSway's speed depends on when).
 float gInHeadSpin = 0;
 float SecondsAt(int64_t t) { return (float)((double)t * 1e-9); }
+// The spin is a FUNCTION of the display time asked for, not an integrator over the calls: the app may locate the head at
+// any time, earlier or later than the last one (its prediction for when an image will be shown), and an integrator
+// stepped only forwards turned a locate for a later time into a permanent jump. Piecewise linear: each change of the
+// rate starts a new segment at the moment it is seen (real time); a time before that segment uses the previous one.
+struct SpinSeg { int64_t t0 = 0; double a0 = 0, rate = 0; };
+std::mutex gSpinM; SpinSeg gSpinCur, gSpinPrev; bool gSpinInit = false;
+double SpinAt(int64_t t)
+{
+    std::lock_guard<std::mutex> lk(gSpinM);
+    const double rate = (double)gInHeadSpin;
+    if (!gSpinInit) { gSpinInit = true; gSpinCur = { NowNs(), 0.0, rate }; gSpinPrev = gSpinCur; }
+    else if (rate != gSpinCur.rate)
+    {
+        const int64_t now = NowNs();
+        const double a = gSpinCur.a0 + gSpinCur.rate * (double)(now - gSpinCur.t0) * 1e-9;
+        gSpinPrev = gSpinCur; gSpinCur = { now, fmod(a, 360.0), rate };
+    }
+    const SpinSeg& sg = (t >= gSpinCur.t0) ? gSpinCur : gSpinPrev;
+    return fmod(sg.a0 + sg.rate * (double)(t - sg.t0) * 1e-9, 360.0);
+}
 void HeadSway(int64_t t, float& yawDeg, float& pitchDeg)
 {
     const float s = SecondsAt(t), a = gInHeadSway;
     yawDeg = a * sinf(6.2831853f * 0.35f * s); pitchDeg = 0.5f * a * sinf(6.2831853f * 0.23f * s + 1.f);
-    static int64_t last = 0; static double spin = 0;
-    if (last && t > last) spin += (double)gInHeadSpin * (double)(t - last) * 1e-9;
-    last = t;
-    spin = fmod(spin, 360.0);
-    yawDeg += (float)spin;
+    yawDeg += (float)SpinAt(t);
 }
 void HandJitter(int64_t t, int hand, float& yawDeg, float& pitchDeg)
 {
@@ -867,20 +891,17 @@ void ToLocal(XrPosef& pose)
     pose.orientation = { hw * q.x + hy * q.z, hw * q.y + hy * q.w, hw * q.z - hy * q.x, hw * q.w - hy * q.y };
 }
 
-MOCK_FN Mock_xrLocateViews(XrSession, const XrViewLocateInfo*, XrViewState* vs,
-    uint32_t cap, uint32_t* count, XrView* views)
+//! The two eyes' poses at display time t (LOCAL space). `recenter`: a pending recenter takes effect here (the app's own
+//! locate); the compositor's look at "where the eye is now" must not consume it.
+void HeadViewsAt(int64_t t, XrView* views, bool recenter, XrPosef* head)
 {
-    *count = 2;
-    vs->viewStateFlags = gInHeadLost > 0.5f ? 0 : (XR_VIEW_STATE_ORIENTATION_VALID_BIT | XR_VIEW_STATE_POSITION_VALID_BIT);
-    if (cap < 2) return XR_SUCCESS;
-
     // Head pose: file-driven once DVR_MockInput.txt exists (deterministic
     // tests); otherwise a slow sine yaw sweep so the pipeline carries changing
     // data. q = yaw(Y) * pitch(X).
     float yaw, pitch = 0;
     if (gHaveInput)
     {
-        float swy = 0, swp = 0; HeadSway(gLastDisplay, swy, swp);
+        float swy = 0, swp = 0; HeadSway(t, swy, swp);
         yaw = (gInHeadYaw + swy) * 3.14159265f / 180.0f;
         pitch = (gInHeadPitch + swp) * 3.14159265f / 180.0f;
     }
@@ -890,23 +911,49 @@ MOCK_FN Mock_xrLocateViews(XrSession, const XrViewLocateInfo*, XrViewState* vs,
     }
     float cy = cosf(yaw * 0.5f), sy = sinf(yaw * 0.5f);
     float cp = cosf(pitch * 0.5f), sp = sinf(pitch * 0.5f);
-    if (gRcPending)
+    if (recenter && gRcPending)
     {   // the new LOCAL space: origin at the head, forward where it faces (yaw only: LOCAL stays gravity-aligned)
         gRcPending = false; gRcYaw = yaw; gRcO[0] = gInHeadX; gRcO[1] = 1.6f + gInHeadY; gRcO[2] = gInHeadZ;
         L("recenter: LOCAL origin now (%.2f,%.2f,%.2f), yaw %.1f deg", gRcO[0], gRcO[1], gRcO[2], gRcYaw * 57.2958f);
     }
+    const XrQuaternionf hq = { cy * sp, sy * cp, -sy * sp, cy * cp };
     for (int i = 0; i < 2; i++)
     {
-        views[i].pose.orientation = { cy * sp, sy * cp, -sy * sp, cy * cp };
+        views[i].pose.orientation = hq;
         {   // the eyes are +-IPD/2 along the HEAD's right axis, so they turn with it (they used to stay on the room's
             // x axis whatever the head did, which hid a stereo bug that only shows with the head turned)
             const float e[3] = { i == 0 ? -0.032f : 0.032f, 0.f, 0.f }; float r[3];
-            QRot(views[i].pose.orientation, e, r);
+            QRot(hq, e, r);
             views[i].pose.position = { r[0] + gInHeadX, r[1] + 1.6f + gInHeadY, r[2] + gInHeadZ };   // standing height + offsets
+        }
+        if (gCantDeg != 0.f)
+        {   // canted displays: the eye turned out from the head (about the head's own up axis): orientation = head * yaw
+            const float c = (i == 0 ? gCantDeg : -gCantDeg) * 3.14159265f / 180.0f * 0.5f;
+            const XrQuaternionf yq = { 0.f, sinf(c), 0.f, cosf(c) };
+            views[i].pose.orientation = { hq.w * yq.x + hq.x * yq.w + hq.y * yq.z - hq.z * yq.y, hq.w * yq.y - hq.x * yq.z + hq.y * yq.w + hq.z * yq.x,
+                                          hq.w * yq.z + hq.x * yq.y - hq.y * yq.x + hq.z * yq.w, hq.w * yq.w - hq.x * yq.x - hq.y * yq.y - hq.z * yq.z };
         }
         views[i].fov = EyeFov(i);
         ToLocal(views[i].pose);
-        gLastViewPose[i] = views[i].pose;          // the compositor's "where the eye is now"
+    }
+    if (head)
+    {   // the VIEW space: between the eyes, the head's own orientation
+        head->orientation = hq; head->position = { gInHeadX, 1.6f + gInHeadY, gInHeadZ };
+        ToLocal(*head);
+    }
+}
+MOCK_FN Mock_xrLocateViews(XrSession, const XrViewLocateInfo* vli, XrViewState* vs,
+    uint32_t cap, uint32_t* count, XrView* views)
+{
+    *count = 2;
+    vs->viewStateFlags = gInHeadLost > 0.5f ? 0 : (XR_VIEW_STATE_ORIENTATION_VALID_BIT | XR_VIEW_STATE_POSITION_VALID_BIT);
+    if (cap < 2) return XR_SUCCESS;
+    // at the time ASKED for (it used to be the last frame's display time whatever the app asked: a prediction for
+    // another time was unmeasurable)
+    const int64_t t = vli && vli->displayTime > 0 ? (int64_t)vli->displayTime : gLastDisplay;
+    HeadViewsAt(t, views, true);
+    for (int i = 0; i < 2; i++)
+    {
         // Lost: the WORST case a runtime is allowed to hand back -- the pose is undefined when the VALID bits are
         // clear, and some return zeros. Anything that still uses it would put the head on the floor.
         if (gInHeadLost > 0.5f) { views[i].pose.orientation = { 0, 0, 0, 1 }; views[i].pose.position = { 0, 0, 0 }; }
@@ -1087,6 +1134,15 @@ MOCK_FN Mock_xrStopHapticFeedback(XrSession, const XrHapticActionInfo*) { return
 
 MOCK_FN Mock_xrLocateSpace(XrSpace space, XrSpace, XrTime time, XrSpaceLocation* loc)
 {
+    if (space == (XrSpace)&gViewSpace)
+    {   // the head (VIEW) in LOCAL
+        XrView v[2] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } }; XrPosef hp;
+        HeadViewsAt(time > 0 ? (int64_t)time : gLastDisplay, v, false, &hp);
+        loc->pose = hp;
+        loc->locationFlags = gInHeadLost > 0.5f ? 0 : (XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT |
+                                                     XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT);
+        return XR_SUCCESS;
+    }
     MockActionSpace* s = (MockActionSpace*)space;
     // Simulated hand aim poses: in front of the head, aiming along -Z. The
     // right hand is driven by hand*, the left by lhand* (independent, so
@@ -1124,7 +1180,7 @@ MOCK_FN Mock_xrLocateSpace(XrSpace space, XrSpace, XrTime time, XrSpaceLocation*
 
 bool LocateLayerSpace(XrSpace space, XrPosef& out)
 {
-    if (space == (XrSpace)&gSpace) { out = { { 0, 0, 0, 1 }, { 0, 0, 0 } }; return true; }   // LOCAL (VIEW is not emulated)
+    if (space == (XrSpace)&gSpace) { out = { { 0, 0, 0, 1 }, { 0, 0, 0 } }; return true; }   // LOCAL
     XrSpaceLocation loc = { XR_TYPE_SPACE_LOCATION };
     Mock_xrLocateSpace(space, (XrSpace)&gSpace, gLastDisplay, &loc);
     if (!(loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)) return false;

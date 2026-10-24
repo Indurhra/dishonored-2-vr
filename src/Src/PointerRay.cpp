@@ -77,9 +77,17 @@ namespace
             memcpy(fwd, axis, 12); return true;
         }
         float vm[16], vorg[3], vaxis[9];
-        const int eye = VRRuntime::CurrentEye();
-        const VRRuntime::HeadPose ep = eye >= 0 ? VRRuntime::GetEyePose(eye) : VRRuntime::GetHeadPose();
-        if (!ViewMatrixHook::RenderView(vm, vorg, vaxis) || !ep.valid)
+        unsigned long long serial = 0;
+        // (the head's axis, not the eye's: a stereo eye's view is turned to its frustum's centre / canted, see RenderView)
+        float eaxis[9];
+        const bool haveView = ViewMatrixHook::RenderView(vm, vorg, eaxis, &serial, vaxis);
+        // the eye and the poses of THAT view (its record), not the eye of whatever frame is being built now
+        const ViewMatrixHook::XrPose rec = haveView ? ViewMatrixHook::RenderPoseXr(serial) : ViewMatrixHook::XrPose();
+        const int eye = rec.valid ? rec.eye : VRRuntime::CurrentEye();
+        VRRuntime::PoseSet vset;
+        const bool fromView = haveView && GpuTrace::HandsFromView() && ViewMatrixHook::ViewPoses(serial, vset) && vset.inputValid;
+        const VRRuntime::HeadPose ep = fromView ? (eye >= 0 ? vset.eye[eye] : vset.head) : eye >= 0 ? VRRuntime::GetEyePose(eye) : VRRuntime::GetHeadPose();
+        if (!haveView || !ep.valid)
         {   // no rendered view yet: the camera-anchored pose is still a pose
             g_Fallback++;
             if (!HandAimHook::ControllerPose(hand, org, axis)) return false;
@@ -87,12 +95,12 @@ namespace
         }
         float yaw = atan2f(vaxis[1], vaxis[0]);
         float off = 0.f;
-        const VRRuntime::HeadPose head = VRRuntime::GetHeadPose();
+        const VRRuntime::HeadPose head = fromView ? vset.head : VRRuntime::GetHeadPose();
         if (head.valid && KbmInject::WorldYawOffset(off)) { yaw = off * kD2R + XrYaw(head.quat); g_Anchored++; g_LastOffset = off; }
         // ControllerPoseAt only takes the YAW of the axis it is given (the hand keeps its own pitch and roll)
         const float c = cosf(yaw), s = sinf(yaw);
         const float ya[9] = { c, s, 0.f, -s, c, 0.f, 0.f, 0.f, 1.f };
-        if (!HandAimHook::ControllerPoseAt(hand, vorg, ya, ep.pos, org, axis)) return false;
+        if (!HandAimHook::ControllerPoseAt(hand, vorg, ya, ep.pos, org, axis, fromView ? &vset.input : nullptr, fromView ? vset.head.quat : nullptr)) return false;
         memcpy(fwd, axis, 12);
         return true;
     }

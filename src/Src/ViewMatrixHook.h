@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+namespace VRRuntime { struct PoseSet; }
 
 //! THE 6DOF hook. idRenderMatrix::CreateViewMatrix(const idVec3* org, const idMat3* axis,
 //! idRenderMatrix* out) = exe+0x109CC0 is what turns m_renderRV.vieworg/viewaxis into the
@@ -55,7 +56,16 @@ namespace ViewMatrixHook
     //! GpuTrace needs it to express a world-space controller pose in the same view space the weapon's MVP lives in
     //! — the two must come from ONE source, because in head-aim mode the render axis is the game's, not the HMD's.
     //! False until the main view has been seen once. `mat` is 16 floats, row-major as the engine stores it.
-    bool RenderView(float mat[16], float org[3], float axis[9], unsigned long long* serial = nullptr);
+    //! `headAxis` (optional): the HEAD's axis that view was composed from -- without a stereo eye's turn to its frustum's
+    //! centre and without the cant of canted displays. Whatever takes only the view's YAW (the hands' room -> world map)
+    //! must take it from here: with the eye's own axis each eye put the hands ~7 deg aside, each its own way.
+    bool RenderView(float mat[16], float org[3], float axis[9], unsigned long long* serial = nullptr, float* headAxis = nullptr);
+    //! The same for a given main view (the last 16 are kept): false when it is gone.
+    bool ViewBySerial(unsigned long long serial, float mat[16], float org[3], float axis[9]);
+    //! Which main view a draw belongs to, from the view matrix in ITS PerViewCB (StereoTaa::ViewMatrixOf): the serial
+    //! of the newest view built with that matrix (either storage order), 0 = none of the last 16.
+    unsigned long long SerialOfViewMatrix(const float m[16]);
+    unsigned long long LatestSerial();
     //! The latest main view's origin, the GAME eye it was composed from (before the HMD offset, the pivot fix and the
     //! takedown view) and the XR position of the head/eye pose used. viewOrg - gameOrg is the composition's offset:
     //! added to the game eye of a LATER frame it says where that frame will be rendered from, which is how the game
@@ -69,6 +79,25 @@ namespace ViewMatrixHook
     //! The game axis is carried into XR by the servo's world anchor (KbmInject::WorldYawOffset).
     //! `serial` 0 = the latest; otherwise the view with that serial if it is still in the ring.
     //! `flat`: the view was the flat game's own (ScreenMode::FlatRender), a picture for the menu screen, not for the eyes.
-    struct XrPose { bool valid = false; unsigned long long serial = 0; float quat[4] = { 0, 0, 0, 1 }; float pos[3] = {}; bool fromGameAxis = false; int eye = -1; bool flat = false; };
+    //! `pair`: synchronised stereo (StereoSync), the serial of the LEFT view of the pair this view belongs to (its own
+    //! for the left one); 0 = not part of a pair.
+    //! `dispTime` / `dispBase` / `predKind` / `predicted`: the display time the view's poses were located for, the frame
+    //! display time that prediction started from, the kind (VRRuntime::LocateForView) and whether it was a prediction.
+    //! `tan` / `tanValid`: the frustum the view was RENDERED with, in its own frame (left, right, up, down tangents): the
+    //! eye's own with the per-eye projection (CameraHook::ApplyEyeProjection), else the symmetric one of its fov. Each
+    //! image is drawn into the eyes at exactly these angles, so a view whose projection differs from the next one's (a
+    //! stereo pair, a mono view between pairs) is never placed with another view's frustum.
+    struct XrPose { bool valid = false; unsigned long long serial = 0; float quat[4] = { 0, 0, 0, 1 }; float pos[3] = {}; bool fromGameAxis = false; int eye = -1; bool flat = false;
+                    unsigned long long pair = 0; long long dispTime = 0, dispBase = 0; int predKind = -1; bool predicted = false;
+                    float tan[4] = {}; bool tanValid = false; bool canted = false;
+                    //! `warp`: a stereo eye view's render frame relative to that eye (v_eye = warp * v_render): its turn
+                    //! towards its frustum's centre (CameraHook::EyeTans, mode 1); the identity otherwise. `quat` is the
+                    //! render frame's: the eye itself was at quat * conj(warp).
+                    float warp[4] = { 0, 0, 0, 1 }; };
     XrPose RenderPoseXr(unsigned long long serial = 0);
+    //! The eye the main view about to be built will be rendered for (0/1, -1 = mono or flat): the decision Hook makes,
+    //! from the same state. For the projection builder's hook, which runs just before it in the same view setup.
+    int NextViewEye();
+    //! The poses (eyes, head, controllers) a main view was built from; serial 0 = the latest. False when it is gone.
+    bool ViewPoses(unsigned long long serial, VRRuntime::PoseSet& out);
 }

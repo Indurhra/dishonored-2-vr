@@ -412,6 +412,19 @@ bool PlayerState::Running(const char* name)
     return (g_RunMask[c >> 6].load() >> (c & 63)) & 1;
 }
 int PlayerState::RunningCount() { return g_RunCount.load(); }
+std::string PlayerState::RunningNames()
+{
+    const uint64_t m[2] = { g_RunMask[0].load(), g_RunMask[1].load() };
+    std::string s;
+    for (int c = 0; c < kNumStates; c++) if ((m[c >> 6] >> (c & 63)) & 1) { if (!s.empty()) s += ","; s += kStates[c].name; }
+    return s.empty() ? "-" : s;
+}
+bool PlayerState::RunningOutside(const char* const* names, int n)
+{
+    uint64_t m[2] = { g_RunMask[0].load(), g_RunMask[1].load() };
+    for (int i = 0; i < n; i++) if (const int c = FindState(names[i]); c >= 0) m[c >> 6] &= ~(1ull << (c & 63));
+    return (m[0] | m[1]) != 0;
+}
 void* PlayerState::StateObject(const char* name)
 {
     const int c = FindState(name);

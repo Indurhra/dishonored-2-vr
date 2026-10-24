@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ViewMatrixHook.h"
+#include "StereoSync.h"
 #include "CameraHook.h"
 #include "HandAimHook.h"
 #include "GameInfo.h"
@@ -28,7 +29,7 @@ namespace
     // The main view as the renderer got it (see ViewMatrixHook::RenderView). Written on the render thread once per
     // frame, read from the D3D draw hooks on the recording threads, hence the mutex.
     std::mutex g_ViewM;
-    float g_ViewMat[16] = {}, g_ViewOrg[3] = {}, g_ViewAxis[9] = {};
+    float g_ViewMat[16] = {}, g_ViewOrg[3] = {}, g_ViewAxis[9] = {}, g_ViewHeadAxis[9] = {};
     float g_ViewGameOrg[3] = {}, g_ViewHmdPos[3] = {}; bool g_ViewHmdValid = false;   // the game eye a view was composed from, and the HMD pose used
 
     // ---- the takedown view (vr animcam) ----
@@ -137,6 +138,10 @@ namespace
     }
     unsigned long long g_ViewSerial = 0;
     ViewMatrixHook::XrPose g_PoseRing[16];                     // under g_ViewM, indexed by serial
+    struct ViewGeo { unsigned long long serial = 0; float mat[16] = {}, org[3] = {}, axis[9] = {}, headAxis[9] = {}; };
+    ViewGeo g_GeoRing[16];                                     // under g_ViewM, indexed by serial: what each view WAS
+    struct ViewSet { unsigned long long serial = 0; VRRuntime::PoseSet set; };
+    ViewSet g_SetRing[16];                                     // under g_ViewM, indexed by serial: the poses each view was built from
 
     //! Quaternion (x,y,z,w) of the rotation whose COLUMNS are c0, c1, c2.
     void QuatFromCols(const float c0[3], const float c1[3], const float c2[3], float q[4])
@@ -159,14 +164,24 @@ namespace
     }
 
     //! `hp` is the HMD pose this view was composed with; `gameAxis` when the axis is the game's (head-aim mode).
-    void PublishView(const float* org, const float* axis, const float* out, const VRRuntime::HeadPose* hp = nullptr, bool gameAxis = false,
-                     const float* gameOrg = nullptr, bool flat = false)
+    //! `eye` -2 = the alternating-stereo eye (VRRuntime::CurrentEye); `pair` see XrPose (~0 = this view starts one).
+    //! Returns the view's serial.
+    unsigned long long PublishView(const float* org, const float* axis, const float* out, const VRRuntime::HeadPose* hp = nullptr, bool gameAxis = false,
+                                   const float* gameOrg = nullptr, bool flat = false, int eye = -2, unsigned long long pair = 0,
+                                   const VRRuntime::PoseSet* ps = nullptr, const CameraHook::Tans* tans = nullptr, bool canted = false, const float* turn = nullptr,
+                                   const float* headAxis = nullptr)
     {
         ViewMatrixHook::XrPose p;
-        p.flat = flat;
+        p.flat = flat; p.canted = canted;
+        if (turn) memcpy(p.warp, turn, 16);
+        {   // the frustum it is rendered with (see XrPose::tan)
+            const CameraHook::Tans t = tans ? *tans : CameraHook::BuiltTans();
+            if (t.valid) { p.tan[0] = t.l; p.tan[1] = t.r; p.tan[2] = t.u; p.tan[3] = t.d; p.tanValid = true; }
+        }
+        if (ps) { p.dispTime = ps->time; p.dispBase = ps->base; p.predKind = ps->kind; p.predicted = ps->predicted; }
         if (hp && hp->valid)
         {
-            p.valid = true; memcpy(p.pos, hp->pos, 12); memcpy(p.quat, hp->quat, 16); p.eye = VRRuntime::CurrentEye();
+            p.valid = true; memcpy(p.pos, hp->pos, 12); memcpy(p.quat, hp->quat, 16); p.eye = eye == -2 ? VRRuntime::CurrentEye() : eye;
             float off = 0;
             if (gameAxis && RoomYawOffset(off))
             {   // the game axis, turned into the room by the servo's world anchor (game yaw = xr yaw + off), then
@@ -184,13 +199,59 @@ namespace
             }
         }
         std::lock_guard lk(g_ViewM);
-        memcpy(g_ViewMat, out, 64); memcpy(g_ViewOrg, org, 12); memcpy(g_ViewAxis, axis, 36);
+        memcpy(g_ViewMat, out, 64); memcpy(g_ViewOrg, org, 12); memcpy(g_ViewAxis, axis, 36); memcpy(g_ViewHeadAxis, headAxis ? headAxis : axis, 36);
         memcpy(g_ViewGameOrg, gameOrg ? gameOrg : org, 12);
         g_ViewHmdValid = hp && hp->valid; if (g_ViewHmdValid) memcpy(g_ViewHmdPos, hp->pos, 12);
         g_ViewSerial++;
         p.serial = g_ViewSerial;
+        p.pair = pair == ~0ull ? g_ViewSerial : pair;
         g_PoseRing[g_ViewSerial % 16] = p;
+        ViewGeo& geo = g_GeoRing[g_ViewSerial % 16];
+        geo.serial = g_ViewSerial; memcpy(geo.mat, out, 64); memcpy(geo.org, org, 12); memcpy(geo.axis, axis, 36); memcpy(geo.headAxis, headAxis ? headAxis : axis, 36);
+        ViewSet& vs = g_SetRing[g_ViewSerial % 16];
+        vs.serial = ps ? g_ViewSerial : 0; if (ps) vs.set = *ps;
         PipeTrace::Event(PipeTrace::View, g_ViewSerial, (uint64_t)(int64_t)p.eye);
+        return g_ViewSerial;
+    }
+
+    //! Synchronised stereo (StereoSync): what the LEFT view of a pair was composed from, so the right view -- built on
+    //! the next, held frame, from the same instant of the world -- is the same camera with the other eye's offset, and
+    //! the two eyes' poses come from ONE located frame. Main view thread only.
+    struct PairBase
+    {
+        bool valid = false, keep = false;
+        float o[3] = {}, a[9] = {}, tmpAxis[9] = {}, ref[3] = {}, gameOrg[3] = {};
+        float scale = 1.f;
+        VRRuntime::PoseSet set;             //!< both eyes, the head and the controllers, located once for the pair
+        unsigned long long serial = 0;      //!< the left view's
+    } g_Pair;
+    std::atomic<unsigned long long> g_PairsRight{ 0 }, g_PairsLeft{ 0 };
+
+    //! The turn of stereo eye `eye`'s render frame from the eye (CameraHook::EyeTans, per-eye frustum mode 1: towards
+    //! its frustum's centre), v_eye = turn * v_render; the identity when there is none. The projection builder's hook
+    //! gave this view the matching symmetric fov a moment ago (from the same headset fov).
+    void EyeTurn(int eye, float turn[4])
+    {
+        turn[0] = turn[1] = turn[2] = 0.f; turn[3] = 1.f;
+        CameraHook::Tans t; float r[4];
+        if (eye >= 0 && eye <= 1 && CameraHook::EyeProj() == 1 && VRRuntime::Stereo() && !ScreenMode::FlatRender() && CameraHook::EyeTans(eye, t, r)) memcpy(turn, r, 16);
+    }
+    //! A stereo eye's render axis: `axis` (the head's: the game's axis in head-aim mode) turned by the eye's rotation
+    //! relative to the head in that view's pose set (canted displays) and then by its render frame's `turn`. False
+    //! (nothing to do) on parallel displays without a turn: the axis is the head's, bit for bit, as before.
+    std::atomic<unsigned long long> g_CantedViews{ 0 }, g_TurnedViews{ 0 };
+    bool EyeAxis(const float axis[9], const VRRuntime::PoseSet& ps, int eye, const float turn[4], float out[9], bool* canted = nullptr)
+    {
+        if (eye < 0 || eye > 1 || !ps.head.valid || !ps.eye[eye].valid) return false;
+        float rel[4]; VRMath::QConjMul(ps.head.quat, ps.eye[eye].quat, rel);
+        const bool cant = fabsf(rel[3]) < 0.99999f;          // over 0.5 deg
+        if (canted) *canted = cant;
+        float total[4]; VRMath::QMul(rel, turn, total);
+        if (fabsf(total[3]) > 0.9999999f) return false;
+        VRMath::TurnAxisLocal(axis, total, out);
+        if (cant) g_CantedViews++;
+        if (fabsf(turn[3]) < 0.9999999f) g_TurnedViews++;
+        return true;
     }
 
     //! A cutscene's vehicle (the development notes, see AnimViewStep): turns `v.baseYaw` as the player's body turns while the
@@ -250,7 +311,7 @@ namespace
     //! The takedown view's state machine; runs on every main-view call in head-aim mode. `o`/`a` come in as the
     //! game's camera and leave as the one to render from (position before the HMD offset, which the caller adds).
     //! `pivotErr`: how far the room-held eye pivot of a moving state is from play's (m), for the hand-back.
-    AnimOut AnimViewStep(float o[3], float a[9], const VRRuntime::HeadPose& eye, float pivotErr)
+    AnimOut AnimViewStep(float o[3], float a[9], const VRRuntime::HeadPose& eye, float pivotErr, const VRRuntime::HeadPose& head)
     {
         AnimOut out;
         // The power wheel takes the same view: while it is up the mouse picks the slot, so the servo cannot turn the
@@ -259,7 +320,6 @@ namespace
         // takedown (KbmInject keeps the servo's target through the wheel, so it turns the game to the head at once).
         const bool wheel = ScreenMode::WheelView();
         const int mode = wheel ? 2 : g_AnimCam.load();
-        const VRRuntime::HeadPose head = VRRuntime::GetHeadPose();
         float hy = 0, hpRaw = 0; HmdAngles(head.valid ? head.quat : eye.quat, hy, hpRaw);
         const float hp = Clampf(hpRaw, -kPitchLimit, kPitchLimit);
         const float gy = atan2f(a[1], a[0]) * kR2D, gp = asinf(Clampf(a[2], -1.f, 1.f)) * kR2D;
@@ -459,25 +519,66 @@ namespace
             g_Real(org, axis, out);
             StereoTaa::OnMainView(mainView, -1, out);
             PublishView(org, axis, out, nullptr, false, nullptr, true);
+            g_Pair.valid = false;
+            StereoSync::CancelPending();
             return;
         }
         if (isMain && g_Enabled.load())
         {
-            // Stereo: render this frame from the current eye's pose (position differs by ±IPD/2).
-            int eye = VRRuntime::CurrentEye();
-            VRRuntime::HeadPose hp = eye >= 0 ? VRRuntime::GetEyePose(eye) : VRRuntime::GetHeadPose();
+            const bool syncOn = StereoSync::Active();
+            if (syncOn && StereoSync::LastFrameHeld() && g_Pair.valid)
+            {   // Synchronised stereo, the RIGHT eye: the held frame drew the same world as the left view's frame. Same
+                // camera (every state machine above already stepped once for the left view), the other eye's offset,
+                // both eyes from one located frame.
+                VRRuntime::HeadPose hp = g_Pair.set.eye[1];
+                float o[3], a[9], ta[9]; memcpy(o, g_Pair.o, 12); memcpy(a, g_Pair.a, 36); memcpy(ta, g_Pair.tmpAxis, 36);
+                float q0[4] = { 0, 0, 0, 1 };
+                // the eye's render frame: turned to its frustum's centre (per-eye frustum), and on canted displays the eye
+                // looks ~10 deg out of the head's axis (the game's)
+                float turn[4]; EyeTurn(1, turn);
+                bool canted = false;
+                // the HEAD's axis (no eye turn, no cant), for whatever takes only the view's yaw: the hands' room -> world
+                float headAxis[9];
+                if (!g_Pair.keep)
+                {   // (the eye's own pose: cant included)
+                    float ho[3]; memcpy(ho, o, 12); memcpy(headAxis, a, 36); VRMath::ComposeHead(hp.pos, g_Pair.set.head.quat, g_Pair.ref, g_Pair.scale, ho, headAxis);
+                    float q[4]; VRMath::QMul(hp.quat, turn, q); memcpy(hp.quat, q, 16);
+                }
+                if (g_Pair.keep) VRMath::ComposeHead(hp.pos, q0, g_Pair.ref, g_Pair.scale, o, ta);
+                else VRMath::ComposeHead(hp.pos, hp.quat, g_Pair.ref, g_Pair.scale, o, a);
+                if (g_Pair.keep) { memcpy(headAxis, a, 36); float ea[9]; if (EyeAxis(a, g_Pair.set, 1, turn, ea, &canted)) memcpy(a, ea, 36); }
+                { std::lock_guard lk(g_M); g_Stats.mainCalls++; g_Stats.applied++; memcpy(g_Stats.lastOrg, o, 12); memcpy(g_Stats.lastFwd, a, 12); }
+                g_Real(o, a, out);
+                CameraHook::Tans tans; CameraHook::ApplyEyeProjection(mainView, 1, tans);   // mode 2 (research): its own matrix, before the engine's VP
+                StereoTaa::OnMainView(mainView, 1, out);
+                PublishView(o, a, out, &hp, g_Pair.keep, g_Pair.gameOrg, false, 1, g_Pair.serial, &g_Pair.set, &tans, canted, turn, headAxis);
+                g_Pair.valid = false; g_PairsRight++;
+                StereoSync::RightBuilt();
+                return;
+            }
+            // Stereo: render this frame from the current eye's pose (position differs by ±IPD/2). Synchronised stereo:
+            // the left eye, with both eyes' poses kept for the right view -- only in play (StereoSync::PairWanted):
+            // otherwise a mono view, one picture submitted to both eyes.
+            const bool sync = syncOn && StereoSync::PairWanted();
+            int eye = sync ? 0 : syncOn ? -1 : VRRuntime::CurrentEye();
+            if (syncOn) g_Pair.valid = false;
+            // the poses this view is built from: located for when its image will be shown (VRRuntime::LocateForView)
+            const VRRuntime::PoseSet ps = VRRuntime::LocateForView(sync ? 1 : eye >= 0 ? 2 : 0);
+            VRRuntime::HeadPose hp = sync ? ps.eye[0] : (eye >= 0 ? ps.eye[eye] : ps.head);
             if (hp.valid)
             {
                 static unsigned refGen = 0;
                 const bool recentred = hp.gen != refGen; refGen = hp.gen;     // the space moved THIS frame: see HeadPose::gen
                 if (g_RecenterReq.exchange(false) || !g_RefValid || recentred)
                 {   // reference = eye midpoint, so per-eye offsets stay symmetric around the game camera
-                    VRRuntime::HeadPose mid = VRRuntime::GetHeadPose();
+                    const VRRuntime::HeadPose& mid = ps.head;
                     memcpy(g_RefPos, mid.valid ? mid.pos : hp.pos, 12); g_RefValid = true;
                 }
                 float o[3], a[9]; memcpy(o, org, 12); memcpy(a, axis, 36);
                 if (HandAimHook::FpAnchor() == 2) HandAimHook::RealCamera(o, a);   // scene view carries the controller pose; render from the real camera
                 o[2] -= HandAimHook::CamTest();          // research: undo the camera lift so only camera-anchored things move
+                float turn[4]; EyeTurn(eye, turn);       // a stereo eye's render frame (per-eye frustum), see EyeTurn
+                float headAxis[9];                       // the head's axis (no eye turn, no cant): see the right eye
                 if (g_KeepGameAxis.load())
                 {   // head-aim mode: the game view already tracks the HMD; only add the positional offset
                     // The game's eye is ~5 cm in front of the body's vertical axis, so when the servo turns the body
@@ -514,7 +615,7 @@ namespace
                             pivErr = sqrtf((pivFull[0] - pivLoco[0]) * (pivFull[0] - pivLoco[0]) + (pivFull[1] - pivLoco[1]) * (pivFull[1] - pivLoco[1]));
                         }
                     }
-                    const AnimOut ao = AnimViewStep(o, a, hp, pivErr);
+                    const AnimOut ao = AnimViewStep(o, a, hp, pivErr, ps.head);
                     if (pivAnchor && !g_AnimViewOn.load())
                     {   // play
                         o[0] += pivFull[0]; o[1] += pivFull[1];
@@ -531,7 +632,7 @@ namespace
                         // +-2.5 deg while standing still), and that is the horizon rocking in a headset. Keep the
                         // game's yaw -- the servo drives it to the head, and it is where the host walks -- and take
                         // pitch from the head, roll level.
-                        const VRRuntime::HeadPose head = VRRuntime::GetHeadPose();
+                        const VRRuntime::HeadPose& head = ps.head;
                         float hy = 0, hpt = 0; HmdAngles(head.valid ? head.quat : hp.quat, hy, hpt);
                         AxisFromAngles(atan2f(a[1], a[0]) * kR2D, Clampf(hpt, -kPitchLimit, kPitchLimit), 0.f, a);
                     }
@@ -566,14 +667,40 @@ namespace
                             AxisFromAngles(atan2f(a[1], a[0]) * kR2D - hy, 0.f, 0.f, tmpAxis);
                         }
                     }
+                    if (sync)
+                    {
+                        g_Pair.keep = true; memcpy(g_Pair.o, o, 12); memcpy(g_Pair.a, a, 36); memcpy(g_Pair.tmpAxis, tmpAxis, 36);
+                        memcpy(g_Pair.ref, g_RefPos, 12); g_Pair.scale = g_Scale.load() * hostScale;
+                    }
                     VRMath::ComposeHead(hp.pos, q0, g_RefPos, g_Scale.load() * hostScale, o, tmpAxis);   // rotation identity -> yaw-only body frame
                 }
                 else
+                {
+                    if (sync) { g_Pair.keep = false; memcpy(g_Pair.o, o, 12); memcpy(g_Pair.a, a, 36); memcpy(g_Pair.ref, g_RefPos, 12); g_Pair.scale = g_Scale.load(); }
+                    {   // the head's axis for the yaw-only readers (see the right eye), then the eye's own pose (cant included)
+                        float ho[3]; memcpy(ho, o, 12); memcpy(headAxis, a, 36);
+                        VRMath::ComposeHead(hp.pos, ps.head.valid ? ps.head.quat : hp.quat, g_RefPos, g_Scale.load(), ho, headAxis);
+                        float q[4]; VRMath::QMul(hp.quat, turn, q); memcpy(hp.quat, q, 16);
+                    }
                     VRMath::ComposeHead(hp.pos, hp.quat, g_RefPos, g_Scale.load(), o, a);
+                }
+                // A stereo eye on canted displays looks ~10 deg out of the head's axis (with the head's own pose, the eye's
+                // quaternion above already carries it), and its render frame is turned to its frustum's centre. The pair
+                // keeps the head's axis: the right eye turns it its own way.
+                const int viewEye = sync ? 0 : eye;
+                bool canted = false;
+                if (g_KeepGameAxis.load()) { memcpy(headAxis, a, 36); float ea[9]; if (EyeAxis(a, ps, viewEye, turn, ea, &canted)) memcpy(a, ea, 36); }
                 { std::lock_guard lk(g_M); g_Stats.mainCalls++; g_Stats.applied++; memcpy(g_Stats.lastOrg, o, 12); memcpy(g_Stats.lastFwd, a, 12); }
                 g_Real(o, a, out);
+                CameraHook::Tans tans; CameraHook::ApplyEyeProjection(mainView, viewEye, tans);   // mode 2 (research): its own matrix
                 StereoTaa::OnMainView(mainView, eye, out);    // each eye's own "previous frame" for the motion vectors
-                PublishView(o, a, out, &hp, g_KeepGameAxis.load(), org);
+                const unsigned long long serial = PublishView(o, a, out, &hp, g_KeepGameAxis.load(), org, false, sync ? 0 : syncOn ? -1 : -2, sync ? ~0ull : 0, &ps, &tans, canted, turn, headAxis);
+                if (sync)
+                {
+                    memcpy(g_Pair.gameOrg, org, 12); g_Pair.set = ps;
+                    g_Pair.serial = serial; g_Pair.valid = true; g_PairsLeft++;
+                    StereoSync::LeftBuilt();
+                }
                 return;
             }
         }
@@ -644,11 +771,51 @@ bool ViewMatrixHook::ViewAnchor(float viewOrg[3], float gameOrg[3], float hmdPos
     memcpy(viewOrg, g_ViewOrg, 12); memcpy(gameOrg, g_ViewGameOrg, 12); memcpy(hmdPos, g_ViewHmdPos, 12);
     return true;
 }
-bool ViewMatrixHook::RenderView(float mat[16], float org[3], float axis[9], unsigned long long* serial)
+bool ViewMatrixHook::ViewPoses(unsigned long long serial, VRRuntime::PoseSet& out)
+{
+    std::lock_guard lk(g_ViewM);
+    if (!g_ViewSerial) return false;
+    if (serial == 0) serial = g_ViewSerial;
+    const ViewSet& v = g_SetRing[serial % 16];
+    if (v.serial != serial || !v.set.valid) return false;
+    out = v.set; return true;
+}
+bool ViewMatrixHook::ViewBySerial(unsigned long long serial, float mat[16], float org[3], float axis[9])
+{
+    std::lock_guard lk(g_ViewM);
+    const ViewGeo& g = g_GeoRing[serial % 16];
+    if (!serial || g.serial != serial) return false;
+    memcpy(mat, g.mat, 64); memcpy(org, g.org, 12); memcpy(axis, g.axis, 36);
+    return true;
+}
+unsigned long long ViewMatrixHook::SerialOfViewMatrix(const float m[16])
+{
+    std::lock_guard lk(g_ViewM);
+    unsigned long long best = 0;
+    for (const ViewGeo& g : g_GeoRing)
+    {
+        if (!g.serial || g.serial <= best) continue;
+        float e0 = 0, e1 = 0;
+        for (int i = 0; i < 4; i++) for (int j = 0; j < 4; j++)
+        { e0 = std::max(e0, fabsf(m[i * 4 + j] - g.mat[i * 4 + j])); e1 = std::max(e1, fabsf(m[i * 4 + j] - g.mat[j * 4 + i])); }
+        if (std::min(e0, e1) < 1e-4f) best = g.serial;     // the newest that matches (a still head repeats a matrix)
+    }
+    return best;
+}
+int ViewMatrixHook::NextViewEye()
+{   // as Hook decides (main view thread)
+    if (!g_Enabled.load() || ScreenMode::FlatRender()) return -1;
+    if (!StereoSync::Active()) return VRRuntime::CurrentEye();
+    if (StereoSync::LastFrameHeld() && g_Pair.valid) return 1;
+    return StereoSync::PairWanted() ? 0 : -1;
+}
+unsigned long long ViewMatrixHook::LatestSerial() { std::lock_guard lk(g_ViewM); return g_ViewSerial; }
+bool ViewMatrixHook::RenderView(float mat[16], float org[3], float axis[9], unsigned long long* serial, float* headAxis)
 {
     std::lock_guard lk(g_ViewM);
     if (!g_ViewSerial) return false;
     memcpy(mat, g_ViewMat, 64); memcpy(org, g_ViewOrg, 12); memcpy(axis, g_ViewAxis, 36);
+    if (headAxis) memcpy(headAxis, g_ViewHeadAxis, 36);
     if (serial) *serial = g_ViewSerial;
     return true;
 }

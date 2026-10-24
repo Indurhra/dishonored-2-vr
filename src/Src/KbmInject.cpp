@@ -17,6 +17,8 @@
 #include "ViewMatrixHook.h"
 #include "BinkVideo.h"
 #include "Overlay.h"
+#include "StereoSync.h"
+#include "CameraHook.h"
 #include <cmath>
 #include <algorithm>
 
@@ -149,6 +151,8 @@ namespace
     enum Scene { kSceneNone = 0, kSceneChoice = 1, kSceneShop = 2, kSceneCount };
     const char* SceneName(int s) { return s == kSceneChoice ? "character choice" : s == kSceneShop ? "black market" : "none"; }
     std::atomic<int> g_SceneMenus{ 1 };           //!< vr scenemenus 0|1 (0 = play's controls there, as before)
+    std::atomic<int> g_PlayRule{ 1 };             //!< vr playrule 0|1 (0 = the list of armless states only, as before 2026-10-23)
+    bool g_PlayLatched = false;                   //!< (Tick) this player has been seen playing: no arms is not a menu
     int g_Scene = kSceneNone;
     // B and the menu button stay ESC there, as in every menu (measured, sent the controllers' way: at a black market ESC
     // leaves a section and then the counter; at the character choice it does nothing, and its "Play as ...? No / Yes"
@@ -560,7 +564,8 @@ namespace
         }
         if (g_HeadAim.load())
         {
-            VRRuntime::HeadPose hp = VRRuntime::GetHeadPose();
+            // the head where it will be when the view built from the mouse sent now is shown (vr predictservo)
+            VRRuntime::HeadPose hp = VRRuntime::GetServoHeadPose();
             if (hp.valid)
             {
                 // XR quaternion -> yaw (about +Y, positive = left) and pitch (about +X, positive = up)
@@ -642,7 +647,10 @@ namespace
         static unsigned long long lastServoAim = ~0ull;
         const unsigned long long aimNow = HandAimHook::AimTicks();
         const bool freshTick = aimNow != lastServoAim;
-        if (servo && !freshTick) { g_YawAccum = 0; g_PitchAccum = 0; }
+        // Synchronised stereo holds every second game frame (StereoSync); mouse motion that a held frame reads is lost,
+        // so the correction waits for the Present before a frame that runs (the angles are still this tick's).
+        const bool canSend = StereoSync::NextFrameRuns();
+        if (servo && (!freshTick || !canSend)) { g_YawAccum = 0; g_PitchAccum = 0; }
         else if (servo)
         {   // Close the loop: inject whatever is still missing to reach the target, every frame. Overshoot from a bad
             // counts/degree is corrected next frame instead of being kept.
@@ -697,6 +705,7 @@ namespace
         }
 
         // Flush the accumulators, at most kMaxCountsPerFrame per axis per frame (engine clamps big deltas).
+        if (StereoSync::NextFrameRuns())
         {
             // The cap is ~12 degrees a frame, whatever the sensitivity: kMaxCountsPerFrame was measured at the reference
             // sensitivity, and as raw counts it let a sensitivity of 3.0 turn the game 28 deg in one frame -- more than the
@@ -884,6 +893,39 @@ void KbmInject::Tick()
                           || PlayerState::Running("Swimming") || PlayerState::Running("SwimMantle") || PlayerState::Cinematic();
     // A menu over the running world (see g_Scene): a menu whatever the draws and the simulation say. The state's tick
     // counter freezes with the game, so its own dialogs ("Play as Emily Kaldwin? No / Yes", a purchase) keep it.
+    // vr playrule 1: the list above is a list of the cases found so far -- the tutorial's chain climb
+    // (Climb with no arms drawn) was not on it and played as a menu (flat screen, mono, no controls). The general rule:
+    // once THIS player has been seen playing (its first-person draws for 10 Presents, or any state but the title
+    // screen's Running + Slipping for 15 while simulating), no arms is play -- except in the states that are a picture
+    // rather than play (death, the kill camera, a note, the journal). Main menu and loading never latch (no player
+    // state runs: RunningCount() 0); a new player (a load) starts unlatched. The title screen runs Running + Slipping
+    // and its camera is a narrow 20 deg: the state route is not taken below 30 deg of vertical fov.
+    bool uiState = false;
+    {
+        static void* latchPlayer = nullptr; static int fpRun = 0, stateRun = 0, noStates = 0;
+        void* player = Game::LocalPlayer();
+        if (player != latchPlayer)
+        {
+            if (g_PlayLatched) LOGI("KbmInject: play latch off (a new player)");
+            latchPlayer = player; g_PlayLatched = false; fpRun = stateRun = 0;
+        }
+        if (PlayerState::RunningCount() == 0) { if (++noStates >= 5 && g_PlayLatched) { g_PlayLatched = false; LOGI("KbmInject: play latch off (no player state runs: a menu or a load)"); } }
+        else noStates = 0;
+        if (g_Simulating && !g_PlayLatched && player)
+        {
+            static const char* const kTitle[] = { "Running", "Slipping" };
+            float fx = 0, fy = 0; CameraHook::GameFov(fx, fy);
+            fpRun = fpDraws > 0 ? fpRun + 1 : 0;
+            stateRun = fy >= 30.f && PlayerState::RunningOutside(kTitle, 2) ? stateRun + 1 : 0;
+            if (fpRun >= 10 || stateRun >= 15)
+            {
+                g_PlayLatched = true;
+                LOGI("KbmInject: play latch on ({}; fov {:.0f}x{:.0f}, states {})", fpRun >= 10 ? "first-person draws" : "player states", fx, fy, PlayerState::RunningNames());
+            }
+        }
+        uiState = PlayerState::Running("Dead") || PlayerState::Running("KillCam") || PlayerState::Running("ReadNote") || PlayerState::Running("Journal");
+    }
+    const bool playRule = g_PlayRule.load() != 0;
     const int scene = !g_SceneMenus.load() ? kSceneNone : PlayerState::Running("CharacterChoice") ? kSceneChoice
                     : PlayerState::Running("BlackMarketInteract") ? kSceneShop : kSceneNone;
     if (scene != g_Scene)
@@ -894,7 +936,8 @@ void KbmInject::Tick()
     }
     // (only the shop: at the character choice the mouse turns the camera, and there is no cursor)
     if (g_ParkCursorUntil >= 0 && g_Scene == kSceneShop) { if (g_Now < g_ParkCursorUntil) MouseMove(400, -400); else g_ParkCursorUntil = -1; }
-    const bool menuNow = (!g_Simulating || (fpDraws <= 0 && !g_Possessing && !armlessPlay) || scene != kSceneNone) && g_MenuInput.load() == 0;
+    const bool noArmsMenu = fpDraws <= 0 && !g_Possessing && !armlessPlay && (!playRule || uiState || !g_PlayLatched);
+    const bool menuNow = (!g_Simulating || noArmsMenu || scene != kSceneNone) && g_MenuInput.load() == 0;
     // Menu fallback: BOTH stick clicks together are the menu button (short = journal, held = pause, like the button).
     // Some controllers have no menu button the runtime hands us: SteamVR presents the PS VR2 Sense controllers as
     // Touch but its conversion drops the menu button (measured by another OpenXR mod), and without a menu there is
@@ -938,8 +981,8 @@ void KbmInject::Tick()
         // movement keys went down on the very tick the wheel's MOUSE3 came up, and with a key held the game left the
         // wheel OPEN (sim flapping for good, the mod flipping menu <-> play every 0.1 s and re-pressing the keys).
         if (g_Mode == kModeWheel) g_StickLatch = true;
-        LOGI("KbmInject: input mode {} -> {} (sim {} fpdraws {} states {} latched 0x{:X})", ModeName(g_Mode), ModeName(mode),
-             g_Simulating, fpDraws, PlayerState::RunningCount(), viaMenu ? btn : 0u);
+        LOGI("KbmInject: input mode {} -> {} (sim {} fpdraws {} states {} [{}] play latch {}{} latched 0x{:X})", ModeName(g_Mode), ModeName(mode),
+             g_Simulating, fpDraws, PlayerState::RunningCount(), PlayerState::RunningNames(), g_PlayLatched ? 1 : 0, uiState ? " ui" : "", viaMenu ? btn : 0u);
         g_Mode = mode;
     }
     if (unpauseUntil >= 0)
@@ -968,7 +1011,7 @@ void KbmInject::Tick()
     g_PrevBtn = live;
     g_MenuSafe = g_Mode == kModeMenu;
     if (g_Mode != kModePlay) { SwordGesture::Reset(); SwordContact::Reset(); }
-    { std::lock_guard lk(g_M); g_Stats.fpDraws = fpDraws; g_Stats.menuSafe = g_MenuSafe; g_Stats.mode = (int)g_Mode; g_Stats.sprint = g_SprintLatch; g_Stats.scene = g_Scene; }
+    { std::lock_guard lk(g_M); g_Stats.fpDraws = fpDraws; g_Stats.menuSafe = g_MenuSafe; g_Stats.mode = (int)g_Mode; g_Stats.sprint = g_SprintLatch; g_Stats.scene = g_Scene; g_Stats.playRule = playRule ? 1 : 0; g_Stats.playLatched = g_PlayLatched; }
     if (g_Mode == kModeMenu)
     {
         g_YawAccum = 0; g_PitchAccum = 0; g_SnapArmed = fabsf(in.turnX) < 0.3f;
@@ -1257,6 +1300,7 @@ std::string KbmInject::ControlsInfo()
 }
 bool KbmInject::Command(const std::string& what, std::istringstream& ss)
 {
+    if (what == "playrule") { int m = 1; ss >> m; g_PlayRule = m ? 1 : 0; LOGI("cmd vr playrule {}: {}", m, m ? "a player seen playing stays in play without arms (death, kill camera, notes, journal excepted)" : "only the listed armless states are play, as before"); return true; }
     if (what == "scenemenus") { int m = 1; ss >> m; g_SceneMenus = m ? 1 : 0; LOGI("cmd vr scenemenus {}: {}", m, m ? "the character choice and a black market are menus (screen, menu controls)" : "they are play, as before"); return true; }
     if (what == "tapkey")
     {

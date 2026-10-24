@@ -64,6 +64,10 @@ namespace PlayerState
     bool Running(const char* name);
     //! How many player states are running. 0 = there is no player being simulated (main menu, loading).
     int RunningCount();
+    //! The running states' names, comma-separated ("-" = none). For the log.
+    std::string RunningNames();
+    //! Is any state running that is not one of these?
+    bool RunningOutside(const char* const* names, int n);
     //! The object that state's methods were last called on (the player's instance of that arkPlayerState), or null
     //! if none was ever called. Not validated: the state objects live as long as the player.
     void* StateObject(const char* name);

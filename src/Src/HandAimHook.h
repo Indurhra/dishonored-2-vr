@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+struct XRInputState;
 
 //! Stage 4b: controller aim ("fire ray"). The weapon code resolves a shot from three sources (see docs/ENGINE.md):
 //!   - the aim point provider (player component #9): GetAimPoint(exe+0x3C3CC0) returns the per-frame crosshair
@@ -97,11 +98,13 @@ namespace HandAimHook
     //! renderer actually used this frame and `eyePosXr` = the XR-space position it was built from. GpuTrace needs
     //! this because the weapon's MVP lives in the RENDER view's space, which differs from the game camera by the
     //! HMD positional offset — anchoring to the game camera would make the weapon drift whenever the player leans.
+    //! `in` / `headQuat` (optional): the controllers and the head's orientation to use instead of the latest located ones --
+    //! the poses a VIEW was built from (VRRuntime::PoseSet), so both eyes of a pair draw the hands from one instant.
     bool ControllerPoseAt(int hand, const float eyeOrg[3], const float viewAxis[9], const float eyePosXr[3],
-                          float org[3], float axis[9]);
+                          float org[3], float axis[9], const XRInputState* in = nullptr, const float* headQuat = nullptr);
     //! An XR-space displacement expressed in world axes, with the same yaw handling ControllerPoseAt applies to the
     //! controller's offset from the eye. GpuTrace hangs the shoulders off the HEAD, which is the eye plus one of these.
-    void XrOffsetToWorld(const float dXr[3], const float viewAxis[9], float out[3]);
+    void XrOffsetToWorld(const float dXr[3], const float viewAxis[9], float out[3], const float* headQuat = nullptr);
 
     void* CameraObject();       //!< arkCpntPlayerCamera
     void* AimCpnt();            //!< player aim component

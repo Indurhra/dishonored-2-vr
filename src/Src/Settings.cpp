@@ -33,10 +33,13 @@ namespace
         { "display.reticle",            Kind::Bool,   "1", 0, 0, nullptr },
         { "display.wristhud",           Kind::Bool,   "1", 0, 0, nullptr },
         { "display.wristhudsize",       Kind::Float,  "8.5", 4, 15, nullptr },
-        { "display.stereo3d",           Kind::Bool,   "0", 0, 0, nullptr },
+        // 0 mono, 1 synchronised stereo, 2 the alternating stereo of 1.0 (whose ini had 1 / true for that one: it gets
+        // the synchronised one now, which is what 1 meant to the player)
+        { "display.stereo3d",           Kind::Choice, "1", 0, 0, "0|1|2|true|false|on|off|yes|no" },
         { "display.renderscale",        Kind::Float,  "1", 0, 2, nullptr },
         { "display.highresolution",     Kind::Bool,   "0", 0, 0, nullptr },   // 0.1.0's ini; replaced by RenderScale
         { "display.disablemotionblur",  Kind::Bool,   "1", 0, 0, nullptr },
+        { "display.disablemetaasw",     Kind::Bool,   "1", 0, 0, nullptr },   // Meta's ASW off for this game (MetaAsw)
         { "display.menuscreen",         Kind::Bool,   "1", 0, 0, nullptr },
         { "display.menuscreensize",     Kind::Float,  "62", 30, 110, nullptr },
         { "display.menuscreendistance", Kind::Float,  "2.4", 0.8f, 10, nullptr },
@@ -162,6 +165,7 @@ std::vector<std::string> Settings::StartupCommands()
     // the headset's frames when the game or the runtime stalls
     c.push_back(B("advanced.keepaliveframes") ? "vr keepalive 1" : "vr keepalive 0");
     c.push_back(fmt::format("vr xrkick {}", F("advanced.newsessionafter")));
+    c.push_back(B("display.disablemetaasw") ? "vr metaasw 1" : "vr metaasw 0");
     return c;
 }
 
@@ -174,7 +178,11 @@ std::vector<std::string> Settings::PackageCommands()
     c.push_back(B("display.reticle") ? "vr reticle 1" : "vr reticle 0");
     c.push_back(B("display.wristhud") ? "vr wristhud 1" : "vr wristhud 0");
     c.push_back(fmt::format("vr wristcfg size {}", F("display.wristhudsize") / 100.f));   // cm in the file, m in the command
-    if (B("display.stereo3d")) c.push_back("vr stereo 1");
+    {
+        const std::string& st = V("display.stereo3d");
+        if (st == "1" || st == "true" || st == "on" || st == "yes") c.push_back("vr stereo 2");   // both eyes of one instant
+        else if (st == "2") c.push_back("vr stereo 1");                                              // alternating eyes
+    }
     // Camera motion blur smears the whole view each time the head-driven camera turns: off in VR (the game keeps it
     // in its own config afterwards, as if it had been unticked in the options).
     if (B("display.disablemotionblur")) c.push_back("exec r_skipCameraMotionBlur 1");

@@ -34,7 +34,7 @@ Conventions used below:
 Dishonored 2 is a flat, first-person, keyboard-and-mouse (or gamepad) game. With the mod installed and an OpenXR
 headset connected, the player:
 
-- sees the game world in the headset, with 6DOF head tracking, either mono or with alternating-eye stereo;
+- sees the game world in the headset, with 6DOF head tracking, either mono or in stereo (both eyes of one instant);
 - aims by looking (the game's camera is turned to follow the head) and moves and acts with the motion controllers;
 - sees their own arms reaching to where the controllers really are, with the weapon, power or gadget in the hand that
   holds it;
@@ -252,10 +252,31 @@ what the player's game learns later replaces it.
   the immediate context executes a command list the serial travels with it (`GpuTrace::ExecutedViewSerial`). The layer
   then claims exactly the pose that image was rendered from, so the compositor's reprojection corrects the true
   difference to the head's current pose. Fallbacks: the serial the draws took, then the latest view (`vr posesource`).
-- **Mono vs stereo.** In mono, the backbuffer goes to both eyes. In alternating-eye stereo (`vr stereo 1`, ini
-  `Stereo3D`), each game frame is rendered from ONE eye's pose (ViewMatrixHook reads `VRRuntime::CurrentEye`) and
-  submitted to that eye only; the other eye keeps its last image. The view record says which eye an image belongs to,
-  which replaced an older fixed phase guess that swapped the eyes in some sessions.
+- **Mono vs stereo** (`vr stereo 0|1|2`, ini `Stereo3D` 0 / 2 / 1). In mono (`0`, the default) the backbuffer goes
+  to both eyes. Both stereo modes render one eye per game frame (the engine draws one view a frame) and the view
+  record says which eye an image belongs to:
+  - **synchronised** (`vr stereo 2`, ini `Stereo3D = 1`): [StereoSync.cpp](../src/Src/StereoSync.cpp) hooks
+    `idGameLocal::RunFrame` (exe+0x8ACDF0). A frame that simulated builds the LEFT eye's view; the next RunFrame is
+    HELD -- no simulation, only the game's Draw (exe+0x8AC710), which publishes the camera's render view -- and builds
+    the RIGHT eye's view of the same world instant (the game clock loses nothing: the next tick gets both frames'
+    delta). Both views come from one set of poses located for the pair's display time (`VRRuntime::LocateForView`), so
+    hands, pointer and servo agree with the picture. The left image is only staged (`XRSession::StagePairLeft`, no
+    OpenXR frame); the right one's Present submits both eyes in one frame (`SubmitPair`), each at the pose it was
+    rendered from. Before a held frame the engine's DirectInput reads are skipped (the events wait for the simulated
+    frame: otherwise about half the key presses were lost). A gate holds only in play: not paused or stopped, no menu,
+    menu screen or player change, no hitch, and 30 Presents after any of those changed (holding a frame while a pause
+    menu opened crashed the game's UI). Anything else is a mono view; a stereo health check falls back to mono (logged,
+    retried with backoff) when no pair reaches the headset (`vr stereohealth`).
+  - **alternating** (`vr stereo 1`, ini `Stereo3D = 2`, the 3D of 1.0): every frame simulates and is submitted to its
+    own eye only; the eyes see two instants of the world, so depth shimmers in motion.
+  The eye whose image is presented is checked every frame against the view the TAA dispatch of that image used
+  (`vr phaseloop`): an image that disagrees is dropped, and two in a row shift the frame-order rule.
+- **Per-eye frustum** (`vr eyeproj 1`, default): each stereo eye's view is TURNED towards the centre of its own frustum
+  and rendered with the smallest symmetric fov that covers it (Quest 3: 6.6 deg out, 5.4 down, 99.7 x 105 deg instead
+  of the cover of both eyes): about 78% of the pixels. An asymmetric projection matrix would be exact but breaks the
+  engine's tiled lighting (`eyeproj 2`, research). The projection layer declares each image's own pose and fov
+  (`vr layerfov 1`, default); `layerfov 0` keeps each eye's native pose and fov and warps the turned image into it.
+  The head's orientation is the VIEW space, not the left eye (canted displays).
 
 [XRSession.cpp](../src/Src/XRSession.cpp) is the OpenXR layer proper (a port of the sister project's session class,
 much extended):
@@ -321,19 +342,27 @@ fullscreen. Never run the console's `writeConfig` on the player's config: it wri
 ### Temporal anti-aliasing per eye
 
 The game's TAA is one compute shader that blends each frame with a history texture, reprojected by motion vectors.
-In alternating-eye stereo the previous frame is the OTHER eye's, which ghosts, so stereo used to switch TAA off.
+In stereo the previous frame is the OTHER eye's, which ghosts, so stereo used to switch TAA off.
 [StereoTaa.cpp](../src/Src/StereoTaa.cpp) gives each eye its own TAA:
 
 - the TAA dispatch (found by its resource names) gets that eye's own history texture bound, and what it writes is
   copied out for that eye;
 - the engine's "previous" view, projection, view-projection and jitter, copied each frame when the view is built, are
   replaced in the CreateViewMatrix hook with those of the same eye's last frame;
-- the cached previous MVP that each entity draw carries in its per-instance buffer is corrected per draw towards the
-  same eye (GpuTrace calls `PrevCorrection`);
+- the cached previous MVP that each entity draw carries in its per-instance buffer (the engine's: the same draw's MVP
+  in the last RENDERED frame, held frames included) is replaced per draw (`vr aaprevrule 1`, GpuTrace calls
+  `FixPrevRows`): a table keyed by every draw's current rows finds the draw of the previous frame whose current rows
+  are this draw's cached previous, and takes THAT draw's original previous -- this eye's last view with the model of
+  its own last frame. (A correction of the view alone kept the model of the held frame: the right eye of synchronised
+  stereo lost all object motion.) Without a match, the view correction `PrevCorrection`;
+- skinned characters need nothing more: the engine renews the skinning palettes (current and previous) only on
+  simulated frames, so a held frame draws the left frame's current pose with the previous step's as previous
+  (measured);
 - which eye a dispatch belongs to is read from the GPU's own data: the view matrix in the PerViewCB that dispatch uses,
   matched against the views ViewMatrixHook built.
 
-`vr stereotaa 0|1|2`; if per-eye TAA cannot run, it falls back to forcing `r_skipTemporalAA 1` in stereo.
+`vr stereotaa 0|1|2`; if per-eye TAA cannot run, it falls back to forcing `r_skipTemporalAA 1` in stereo. The mono
+views a gated synchronised stereo makes do not count as failures (`vr aamonowin`).
 
 ---
 
@@ -886,7 +915,8 @@ entries replaced).
 | [ViewMatrixHook](../src/Src/ViewMatrixHook.cpp) | 6DOF view composition, takedown/cutscene views, view ring | CreateViewMatrix exe+0x109CC0 |
 | [PlayerViewHook](../src/Src/PlayerViewHook.cpp) | (disabled) render views of other entities | exe+0x881640 |
 | [BodyView](../src/Src/BodyView.cpp) | body-vs-real instrument, `fov auto` mode | - |
-| [StereoTaa](../src/Src/StereoTaa.cpp) | per-eye TAA in alternating stereo | via GpuTrace context hooks and ViewMatrixHook |
+| [StereoTaa](../src/Src/StereoTaa.cpp) | per-eye TAA in stereo | via GpuTrace context hooks and ViewMatrixHook |
+| [StereoSync](../src/Src/StereoSync.cpp) | synchronised stereo: every second game frame held (Draw only), its gate, input reads deferred | idGameLocal::RunFrame exe+0x8ACDF0, Draw exe+0x8AC710 (called), keyboard / mouse reads exe+0xE1970 / exe+0xE2930 |
 | [PipeTrace](../src/Src/PipeTrace.cpp) | frame pipeline trace | - |
 | [KbmInject](../src/Src/KbmInject.cpp) | controllers to keyboard/mouse, modes, head-aim servo, focus | `SendInput`; reads `g_mouseSensitivity`, `g_invertMouseYAxis` |
 | [KeyBinds](../src/Src/KeyBinds.cpp) | the player's key bindings, physical key positions | reads `dishonored2Config.cfg` |

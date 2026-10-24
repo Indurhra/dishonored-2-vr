@@ -87,13 +87,14 @@ namespace
         const float cy = cosf(yaw * 0.5f), sy = sinf(yaw * 0.5f), cp = cosf(pitch * 0.5f), sp = sinf(pitch * 0.5f);
         q[0] = cy * sp; q[1] = sy * cp; q[2] = -sy * sp; q[3] = cy * cp;
     }
-    //! The head now: the eyes' midpoint, the left eye's orientation.
+    //! The head now: the eyes' midpoint, the head's own orientation (XRSession::Head: not the left eye's, which a
+    //! headset with canted displays turns ~10 deg out).
     bool Head(XRSession& xr, float p[3], float q[4])
     {
         if (xr.EyeCount() < 1 || !xr.Eye(0).valid) return false;
-        const XREyePose& a = xr.Eye(0); const XREyePose& b = xr.Eye(xr.EyeCount() > 1 ? 1 : 0);
-        p[0] = (a.posX + b.posX) * 0.5f; p[1] = (a.posY + b.posY) * 0.5f; p[2] = (a.posZ + b.posZ) * 0.5f;
-        q[0] = a.quatX; q[1] = a.quatY; q[2] = a.quatZ; q[3] = a.quatW;
+        const XREyePose& h = xr.Head();
+        p[0] = h.posX; p[1] = h.posY; p[2] = h.posZ;
+        q[0] = h.quatX; q[1] = h.quatY; q[2] = h.quatZ; q[3] = h.quatW;
         return true;
     }
     //! In front of the head: its yaw, its pitch within [pmin, pmax], `dist` away.

@@ -18,6 +18,11 @@ namespace GpuTrace
 {
     //! Install from the game's own swapchain (call at the first Present, not from init).
     bool Install(IDXGISwapChain* sc);
+    //! Hooks the immediate context's other implementation once it is in use (multithread protection switches it). Render thread, every Present.
+    void RehookImmediate();
+    //! vr handsfromview: the hands / weapons placed with the poses their view was built from (1) or the latest (0).
+    void SetHandsFromView(bool on);
+    bool HandsFromView();
     void Uninstall();
 
     //! Record the next frame's draw signatures and write them to the log under this tag.
@@ -134,6 +139,11 @@ namespace GpuTrace
     bool ProjectWorld(const float w[3], float ndc[2], float* depth = nullptr);
     //! The inverse: the world ray (eye, unit direction) through an NDC point of the same projection and view.
     bool UnprojectNdc(const float ndc[2], float org[3], float dir[3]);
+    //! On this thread, ProjectWorld / UnprojectNdc use the projection and view of main view `serial` when its draws were
+    //! seen (the last 4 views are kept), else the latest as before; 0 = the latest. The reticle draws onto the image
+    //! about to be presented, which is not the latest view (the pipeline), and in stereo with the per-eye projection
+    //! the two eyes' projections differ by a third of the picture.
+    void ProjectForSerial(unsigned long long serial);
     //! This frame's controller ray in world space, anchored to the RENDER view exactly as the weapon and the hand
     //! are, so the reticle cannot disagree with where the gun is drawn. Rows/columns as elsewhere: fwd = column 0.
     bool HandRay(int hand, float org[3], float fwd[3]);

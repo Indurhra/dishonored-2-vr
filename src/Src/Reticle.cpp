@@ -7,6 +7,7 @@
 #include "PointerRay.h"
 #include "GrabHand.h"
 #include "SwordContact.h"
+#include "VRRuntime.h"
 #include <imgui.h>
 #include <cmath>
 #include <array>
@@ -235,6 +236,9 @@ void Reticle::Draw()
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     const ImVec2 size = ImGui::GetIO().DisplaySize;
     if (!dl || size.x < 16.f || size.y < 16.f) return;
+    // projected with the frustum of the image this lands on (the one about to be presented), not the latest view's: in
+    // stereo the two eyes' projections differ (CameraHook::ApplyEyeProjection)
+    struct ProjScope { ProjScope() { GpuTrace::ProjectForSerial(VRRuntime::PresentingSerial()); } ~ProjScope() { GpuTrace::ProjectForSerial(0); } } projScope;
     Stats st; st.frames = 1;
     if (mode == 1 || mode == 2) DrawHand(HandAimHook::PowerHand() & 1, dl, size, st);
     if (mode == 1 || mode == 3)

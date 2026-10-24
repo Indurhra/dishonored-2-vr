@@ -14,7 +14,7 @@ controllers. Free, open source, unofficial.
 - **Cutscenes play around you** (look anywhere; hold A or X to skip); takedowns, climbing and sliding keep the view on
   your head so they stay comfortable.
 
-> Status: **1.0.0**. Developed and played on a Meta Quest 3 (Link / Air Link). Other headsets and runtimes are expected to
+> Status: **0.5.0, beta** (it replaces 1.0.0, which was numbered too early). Developed and played on a Meta Quest 3 (Link / Air Link). Other headsets and runtimes are expected to
 > work but are less tested: see [docs/STATUS.md](docs/STATUS.md) for what is verified, and the known issues.
 
 ## Install
