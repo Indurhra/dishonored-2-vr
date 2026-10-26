@@ -3415,9 +3415,14 @@ namespace
         if (s) { g_ExecSerial = s; g_ExecFrame = g_PresentFrame; }
         PipeTrace::Event(PipeTrace::Execute, (uint64_t)(uintptr_t)l & 0xFFFFF, s);
     }
-    void STDMETHODCALLTYPE HkExecCL(ID3D11DeviceContext* c, ID3D11CommandList* l, BOOL restore) { NoteExecuted(l); g_RealExecCL(c, l, restore); }
-    ExecCL_t g_RealExecCLMT = nullptr;   // the thread-safe immediate context's (see RehookImmediate)
-    void STDMETHODCALLTYPE HkExecCLMT(ID3D11DeviceContext* c, ID3D11CommandList* l, BOOL restore) { NoteExecuted(l); g_RealExecCLMT(c, l, restore); }
+    thread_local unsigned g_HookDepth[115]{};
+    struct HookScope {
+        unsigned& depth; bool outer;
+        explicit HookScope(int slot):depth(g_HookDepth[slot]),outer(depth++==0){}
+        ~HookScope(){--depth;}
+    };
+    void STDMETHODCALLTYPE HkExecCL(ID3D11DeviceContext* c, ID3D11CommandList* l, BOOL restore) { HookScope call(58); if(call.outer) NoteExecuted(l); g_RealExecCL(c, l, restore); }
+
 
     //! Alternating-eye stereo with per-eye TAA: an entity's draw carries the previous MVP the engine cached from the
     //! last frame -- the OTHER eye's view (measured: arms, weapons, doors, props ~190 px of false motion with the head
@@ -3695,12 +3700,14 @@ namespace
 
         static void STDMETHODCALLTYPE Dispatch(ID3D11DeviceContext* c, UINT x, UINT y, UINT z)
         {
+            HookScope call(41); if(!call.outer) return realDispatch(c, x, y, z);
             StereoTaa::Pass p; StereoTaa::OnDispatch(c, KIND, x, y, z, false, p);
             realDispatch(c, x, y, z);
             StereoTaa::AfterPass(c, KIND, p);
         }
         static void STDMETHODCALLTYPE DispatchInd(ID3D11DeviceContext* c, ID3D11Buffer* b, UINT o)
         {
+            HookScope call(42); if(!call.outer) return realDispatchInd(c, b, o);
             StereoTaa::Pass p; StereoTaa::OnDispatch(c, KIND, 0, 0, 0, true, p);
             realDispatchInd(c, b, o);
             StereoTaa::AfterPass(c, KIND, p);
@@ -3708,11 +3715,13 @@ namespace
         static void STDMETHODCALLTYPE CopyRegion(ID3D11DeviceContext* c, ID3D11Resource* d, UINT ds, UINT x, UINT y, UINT z,
                                                  ID3D11Resource* s, UINT ss, const D3D11_BOX* box)
         {
+            HookScope call(46); if(!call.outer) return realCopyRegion(c, d, ds, x, y, z, s, ss, box);
             StereoTaa::OnCopy(c, KIND, d, s, true);
             realCopyRegion(c, d, ds, x, y, z, s, ss, box);
         }
         static void STDMETHODCALLTYPE Copy(ID3D11DeviceContext* c, ID3D11Resource* d, ID3D11Resource* s)
         {
+            HookScope call(47); if(!call.outer) return realCopy(c, d, s);
             StereoTaa::OnCopy(c, KIND, d, s, false);
             realCopy(c, d, s);
         }
@@ -3722,6 +3731,7 @@ namespace
         static HRESULT STDMETHODCALLTYPE Map(ID3D11DeviceContext* c, ID3D11Resource* r, UINT sub, D3D11_MAP type,
                                              UINT flags, D3D11_MAPPED_SUBRESOURCE* out)
         {
+            HookScope call(14); if(!call.outer) return realMap(c, r, sub, type, flags, out);
             HRESULT hr = realMap(c, r, sub, type, flags, out);
             if (SUCCEEDED(hr) && !sub && out && out->pData)
             {
@@ -3733,6 +3743,7 @@ namespace
         }
         static void STDMETHODCALLTYPE Unmap(ID3D11DeviceContext* c, ID3D11Resource* r, UINT sub)
         {
+            HookScope call(15); if(!call.outer) return realUnmap(c, r, sub);
             if (!sub)
             {   // StereoTaa first: the PerViewCB of the TAA
                 StereoTaa::OnUnmap(c, r);
@@ -3746,6 +3757,7 @@ namespace
         static void STDMETHODCALLTYPE UpdateSub(ID3D11DeviceContext* c, ID3D11Resource* r, UINT sub,
                                                 const D3D11_BOX* box, const void* data, UINT rp, UINT dp)
         {
+            HookScope call(48); if(!call.outer) return realUpdateSub(c, r, sub, box, data, rp, dp);
             // t_InSwap: our own rewrite goes through this very hook and would cache OUR buffer, evicting the game's
             // entry from the same slot and starving the next draw.
             if (!sub && !box && data && !t_InSwap)
@@ -3759,6 +3771,7 @@ namespace
 
         static void STDMETHODCALLTYPE DrawIndexed(ID3D11DeviceContext* c, UINT n, UINT s, INT b)
         {
+            HookScope call(12); if(!call.outer) return realDrawIndexed(c, n, s, b);
             Record(c, KIND, eDrawIndexed, n);
             WristHud::OnDraw(c, KIND, eDrawIndexed, n);
             if (Skipped(n) || SkippedVs(c)) return;
@@ -3771,7 +3784,8 @@ namespace
             EndTarget(c, t);
         }
         static void STDMETHODCALLTYPE Draw(ID3D11DeviceContext* c, UINT n, UINT s)
-        {   // proximity targeting works off the constants, not the count, so the non-indexed paths qualify too --
+        {
+            HookScope call(13); if(!call.outer) return realDraw(c, n, s);   // proximity targeting works off the constants, not the count, so the non-indexed paths qualify too --
             // and a weapon pass left out here would stay behind and clip the moved geometry against its own depth
             Record(c, KIND, eDraw, n);
             WristHud::OnDraw(c, KIND, eDraw, n);
@@ -3786,6 +3800,7 @@ namespace
         }
         static void STDMETHODCALLTYPE DrawIdxInst(ID3D11DeviceContext* c, UINT n, UINT i, UINT s, INT b, UINT si)
         {
+            HookScope call(20); if(!call.outer) return realDrawIdxInst(c, n, i, s, b, si);
             Record(c, KIND, eDrawIndexedInstanced, n);
             WristHud::OnDraw(c, KIND, eDrawIndexedInstanced, n);
             if (Skipped(n) || SkippedVs(c)) return;
@@ -3799,6 +3814,7 @@ namespace
         }
         static void STDMETHODCALLTYPE DrawInst(ID3D11DeviceContext* c, UINT n, UINT i, UINT s, UINT si)
         {
+            HookScope call(21); if(!call.outer) return realDrawInst(c, n, i, s, si);
             Record(c, KIND, eDrawInstanced, n);
             WristHud::OnDraw(c, KIND, eDrawInstanced, n);
             if (SkippedVs(c)) return;
@@ -3811,9 +3827,11 @@ namespace
             EndTarget(c, t);
         }
         static void STDMETHODCALLTYPE DrawIdxInstIndirect(ID3D11DeviceContext* c, ID3D11Buffer* b, UINT o)
-        { Record(c, KIND, eDrawIndexedInstancedIndirect, 0); if (SkippedVs(c)) return; realDrawIdxInstIndirect(c, b, o); }
+        {
+            HookScope call(39); if(!call.outer) return realDrawIdxInstIndirect(c, b, o); Record(c, KIND, eDrawIndexedInstancedIndirect, 0); if (SkippedVs(c)) return; realDrawIdxInstIndirect(c, b, o); }
         static void STDMETHODCALLTYPE DrawInstIndirect(ID3D11DeviceContext* c, ID3D11Buffer* b, UINT o)
-        { Record(c, KIND, eDrawInstancedIndirect, 0); if (SkippedVs(c)) return; realDrawInstIndirect(c, b, o); }
+        {
+            HookScope call(40); if(!call.outer) return realDrawInstIndirect(c, b, o); Record(c, KIND, eDrawInstancedIndirect, 0); if (SkippedVs(c)) return; realDrawInstIndirect(c, b, o); }
 
         //! Attach to one vtable. Entries already detoured for the other kind (shared implementation) are skipped.
         static int Attach(void** vt, void** taken, int nTaken)
@@ -3864,13 +3882,60 @@ namespace
     };
     using Imm = Hooks<0>;
     using Def = Hooks<1>;
-    using ImmMT = Hooks<0, 1>;
-    // every context slot the hooks cover (draws, Map/Unmap/UpdateSubresource, dispatches, copies, ExecuteCommandList), and
-    // every function already detoured in them (RehookImmediate)
-    constexpr int kHookedImmSlots[] = { 12, 13, 20, 21, 39, 40, kMapSlot, kUnmapSlot, kUpdateSubSlot, kDispatchSlot, kDispatchIndSlot,
-                                        kCopyRegionSlot, kCopySlot, 58 };
+    constexpr int kHookedImmSlots[] = {12,13,20,21,39,40,14,15,48,41,42,46,47,58};
     std::vector<void*> g_HookedFns;
-    bool g_ImmMTHooked = false;
+    unsigned g_ImmVariants=0;
+    template<class H> void RememberHooks(void** vt) {
+        if(H::realDispatch) g_HookedFns.push_back(vt[41]);
+        if(H::realDispatchInd) g_HookedFns.push_back(vt[42]);
+        if(H::realCopyRegion) g_HookedFns.push_back(vt[46]);
+        if(H::realCopy) g_HookedFns.push_back(vt[47]);
+        if(H::realMap) g_HookedFns.push_back(vt[14]);
+        if(H::realUnmap) g_HookedFns.push_back(vt[15]);
+        if(H::realUpdateSub) g_HookedFns.push_back(vt[48]);
+        if(H::realDrawIndexed) g_HookedFns.push_back(vt[12]);
+        if(H::realDraw) g_HookedFns.push_back(vt[13]);
+        if(H::realDrawIdxInst) g_HookedFns.push_back(vt[20]);
+        if(H::realDrawInst) g_HookedFns.push_back(vt[21]);
+        if(H::realDrawIdxInstIndirect) g_HookedFns.push_back(vt[39]);
+        if(H::realDrawInstIndirect) g_HookedFns.push_back(vt[40]);
+    }
+    template<int V> struct ExtraImmediate {
+        using H=Hooks<0,V>;
+        static inline ExecCL_t exec=nullptr;
+        static inline bool attached=false;
+        static void STDMETHODCALLTYPE Execute(ID3D11DeviceContext* c,ID3D11CommandList* l,BOOL restore) {
+            HookScope call(58);if(call.outer) NoteExecuted(l);exec(c,l,restore);
+        }
+        static void Attach(void** vt) {
+            void* snapshot[115]{};std::copy(vt,vt+115,snapshot);
+            DetourTransactionBegin();DetourUpdateThread(GetCurrentThread());
+            const int n=H::Attach(snapshot,g_HookedFns.data(),(int)g_HookedFns.size());
+            if(std::find(g_HookedFns.begin(),g_HookedFns.end(),snapshot[58])==g_HookedFns.end() && Hookable(snapshot[58],"late ExecuteCommandList")) {
+                exec=(ExecCL_t)snapshot[58];DetourAttach(&(PVOID&)exec,Execute);
+            }
+            const LONG result=DetourTransactionCommit();
+            if(result==NO_ERROR) {attached=true;RememberHooks<H>(snapshot);if(exec)g_HookedFns.push_back(snapshot[58]);}
+            LOGI("GpuTrace: immediate implementation {}: {} hooks, ExecuteCommandList {}, detour={}",V,n,exec?1:0,result);
+        }
+        static void Detach() {
+            if(!attached)return;
+            if(H::realDispatch) DetourDetach(&(PVOID&)H::realDispatch,H::Dispatch);
+            if(H::realDispatchInd) DetourDetach(&(PVOID&)H::realDispatchInd,H::DispatchInd);
+            if(H::realCopyRegion) DetourDetach(&(PVOID&)H::realCopyRegion,H::CopyRegion);
+            if(H::realCopy) DetourDetach(&(PVOID&)H::realCopy,H::Copy);
+            if(H::realMap) DetourDetach(&(PVOID&)H::realMap,H::Map);
+            if(H::realUnmap) DetourDetach(&(PVOID&)H::realUnmap,H::Unmap);
+            if(H::realUpdateSub) DetourDetach(&(PVOID&)H::realUpdateSub,H::UpdateSub);
+            if(H::realDrawIndexed) DetourDetach(&(PVOID&)H::realDrawIndexed,H::DrawIndexed);
+            if(H::realDraw) DetourDetach(&(PVOID&)H::realDraw,H::Draw);
+            if(H::realDrawIdxInst) DetourDetach(&(PVOID&)H::realDrawIdxInst,H::DrawIdxInst);
+            if(H::realDrawInst) DetourDetach(&(PVOID&)H::realDrawInst,H::DrawInst);
+            if(H::realDrawIdxInstIndirect) DetourDetach(&(PVOID&)H::realDrawIdxInstIndirect,H::DrawIdxInstIndirect);
+            if(H::realDrawInstIndirect) DetourDetach(&(PVOID&)H::realDrawInstIndirect,H::DrawInstIndirect);
+            if(exec) DetourDetach(&(PVOID&)exec,Execute);
+        }
+    };
     bool g_Installed = false;
 
     // --- stage 4: read the shader instead of guessing which constants matter ---
@@ -4430,11 +4495,17 @@ bool GpuTrace::Install(IDXGISwapChain* sc)
         if (Hookable((const void*)g_RealFinishCL, "FinishCommandList")) DetourAttach(&(PVOID&)g_RealFinishCL, HkFinishCL); else g_RealFinishCL = nullptr;
         if (Hookable((const void*)g_RealExecCL, "ExecuteCommandList")) DetourAttach(&(PVOID&)g_RealExecCL, HkExecCL); else g_RealExecCL = nullptr;
     }
+    void* savedImm[115]{}, *savedDef[115]{};
+    if(vtImm)std::copy(vtImm,vtImm+115,savedImm);
+    if(vtDef)std::copy(vtDef,vtDef+115,savedDef);
     LONG r = DetourTransactionCommit();
     g_Installed = (r == NO_ERROR);
     g_Stats.installed = g_Installed;
-    if (vtImm) for (int s : kHookedImmSlots) g_HookedFns.push_back(vtImm[s]);
-    if (vtDef) for (int s : kHookedImmSlots) g_HookedFns.push_back(vtDef[s]);
+    if(g_Installed) {
+        if(vtImm)RememberHooks<Imm>(savedImm);
+        if(vtDef)RememberHooks<Def>(savedDef);
+        if(g_RealExecCL)g_HookedFns.push_back(savedImm[58]);
+    }
     LOGI("GpuTrace: immediate vt={} [{}] ({} hooks), deferred vt={} [{}] ({} hooks), detour={}",
          (void*)vtImm, vtImm ? ModuleOf(vtImm) : "-", nImm, (void*)vtDef, vtDef ? ModuleOf(vtDef) : "-", nDef, r);
     return g_Installed;
@@ -4444,7 +4515,7 @@ bool GpuTrace::Install(IDXGISwapChain* sc)
 //! keep-alive frames): D3D11 then calls a thread-safe set of functions that never reach the hooks put
 //! on the first set. Measured 2026-10-23: from then on no ExecuteCommandList and no write of the TAA's PerViewCB was
 //! seen -- the presented image was named one view late (the stereo eyes swapped) and per-eye TAA fell back to off.
-//! Checked every Present (a few compares): a set of functions not hooked yet gets its own hooks (Hooks<0, 1>).
+//! Checked every Present (a few compares): a set of functions not hooked yet gets independent trampolines (up to four additional implementations).
 void GpuTrace::RehookImmediate()
 {
     if (!g_Installed || !g_Immediate) return;
@@ -4454,28 +4525,17 @@ void GpuTrace::RehookImmediate()
     for (int s : kHookedImmSlots)
         if (std::find(g_HookedFns.begin(), g_HookedFns.end(), vt[s]) == g_HookedFns.end()) { fresh = true; break; }
     if (!fresh) return;
-    if (g_ImmMTHooked) {
-        static bool reported = false;
-        if (!reported) {
-            reported = true;
-            for (int slot : kHookedImmSlots)
-                if (std::find(g_HookedFns.begin(), g_HookedFns.end(), vt[slot]) == g_HookedFns.end())
-                    LOGI("GpuTrace: untracked later context implementation slot {} function {} [{}]", slot, vt[slot], ModuleOf(vt[slot]));
-        }
-        return;
+    // D3D11 may change more than once (runtime protection, video playback).
+    // Each variant keeps independent trampolines; failed transactions consume a
+    // slot but are not marked covered. Bounded retries avoid patching every frame.
+    switch(++g_ImmVariants) {
+        case 1: ExtraImmediate<1>::Attach(vt);break;
+        case 2: ExtraImmediate<2>::Attach(vt);break;
+        case 3: ExtraImmediate<3>::Attach(vt);break;
+        case 4: ExtraImmediate<4>::Attach(vt);break;
+        case 5: LOGI("GpuTrace: additional implementation exceeds hook capacity");break;
+        default: g_ImmVariants=5;break;
     }
-    g_ImmMTHooked = true;
-    std::vector<void*> taken = g_HookedFns;
-    DetourTransactionBegin();
-    DetourUpdateThread(GetCurrentThread());
-    const int n = ImmMT::Attach(vt, taken.data(), (int)taken.size());
-    bool exec = false;
-    if (std::find(taken.begin(), taken.end(), vt[58]) == taken.end() && Hookable(vt[58], "immediate (thread-safe) ExecuteCommandList"))
-    { g_RealExecCLMT = (ExecCL_t)vt[58]; DetourAttach(&(PVOID&)g_RealExecCLMT, HkExecCLMT); exec = true; }
-    const LONG r = DetourTransactionCommit();
-    for (int s : kHookedImmSlots) g_HookedFns.push_back(vt[s]);
-    LOGI("GpuTrace: the immediate context switched implementation (multithread protection): vt={} [{}], {} hooks + ExecuteCommandList {} added, detour={}",
-         (void*)vt, ModuleOf(vt), n, exec ? 1 : 0, r);
 }
 
 void GpuTrace::Uninstall()
@@ -4510,6 +4570,12 @@ void GpuTrace::Uninstall()
     if (Def::realDispatchInd)         DetourDetach(&(PVOID&)Def::realDispatchInd, Def::DispatchInd);
     if (Def::realCopyRegion)          DetourDetach(&(PVOID&)Def::realCopyRegion, Def::CopyRegion);
     if (Def::realCopy)                DetourDetach(&(PVOID&)Def::realCopy, Def::Copy);
+    if(g_ImmVariants>=1)ExtraImmediate<1>::Detach();
+    if(g_ImmVariants>=2)ExtraImmediate<2>::Detach();
+    if(g_ImmVariants>=3)ExtraImmediate<3>::Detach();
+    if(g_ImmVariants>=4)ExtraImmediate<4>::Detach();
+    if(g_RealExecCL)DetourDetach(&(PVOID&)g_RealExecCL,HkExecCL);
+    if(g_RealFinishCL)DetourDetach(&(PVOID&)g_RealFinishCL,HkFinishCL);
     DetourTransactionCommit();
     g_Installed = false;
 }

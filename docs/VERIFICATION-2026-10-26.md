@@ -132,3 +132,40 @@ improvement is claimed yet; the user needs to launch and compare normal gameplay
 with the new stereo_fps reading. CPU engine cost, GPU engine cost and runtime
 throttling remain possible additional limits. Neither 90 Hz performance nor a
 complete cure for the reported low FPS has been established.
+
+## Graphics hooks, distant blur and lens effects (evening)
+
+Reproduced the real-headset hook failure without a headset by launching with
+MockXR noHeadset=1, waiting for the menu videos, then enabling the simulated
+headset. Baseline 9fd9bcc misses later Map/Unmap/ExecuteCommandList implementations:
+361 missing TAA view shadows and automatic TAA fallback. The repaired build handles
+three successive implementations, keeps per-eye TAA active, and reports zero
+missing shadows in the loaded Void scene. Nested wrapper/native calls are counted
+only once using a per-thread, per-API guard. Failed detour transactions are not
+registered as successful hooks; additional implementation capacity is bounded.
+
+Both baseline and repaired build reached 90 stereo pairs/sec in this simulator
+case at 3076x3140 eye textures and 2873x3741 engine rendering. This proves the hook
+repair, NOT a headset FPS improvement. SteamVR throttling/frame scheduling and
+AER stick-turn blur remain unresolved. No early xrBeginFrame scheduling change,
+single-pass stereo or AFW implementation is included.
+
+Added Display.DisableDepthOfField=1 and DisableLensEffects=1 defaults; the latter
+disables r_skipLensFlares, r_skipEmissiveGlare and r_skipBloom passes by setting
+their skip flags to 1. Display.TextureAnisotropy defaults to 16. These use the
+existing direct numeric CVar writer: queued console commands returned success
+without applying these settings in the startup test. Final build startup readback
+confirms all four skip flags=1 and anisotropy=16. Numeric values survive loading
+into the save; CVar string values are unchanged by this runtime-only writer.
+Setting either disable option to 0 leaves the game's value alone on next launch.
+Scene lighting and reflective materials are not globally disabled. Headset
+perception of the reported flashing cannot be certified by the simulator.
+
+Depth-of-field was enabled; it is a plausible contributor to distant blur.
+Earlier exec-based screenshot comparisons are not sufficient proof by themselves
+because command acceptance did not guarantee application. Final direct-setting
+capture is local/fps-blur-repair/DVR_effects_off_eye0.png. Baseline and repaired
+logs/heartbeats are retained in that local directory, plus final startup readback.
+Release build and all eight host checks pass. Trigger/haptic policy, body settings
+and Toolkit settings are unchanged. Simulator overrides are removed after testing;
+pre-test saves, game config and hand calibration are restored.

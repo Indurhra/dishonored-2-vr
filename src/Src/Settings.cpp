@@ -47,6 +47,9 @@ namespace
         { "display.renderscale",        Kind::Float,  "1", 0, 2, nullptr },
         { "display.highresolution",     Kind::Bool,   "0", 0, 0, nullptr },   // 0.1.0's ini; replaced by RenderScale
         { "display.disablemotionblur",  Kind::Bool,   "1", 0, 0, nullptr },
+        { "display.disabledepthoffield",Kind::Bool,   "1", 0, 0, nullptr },
+        { "display.disablelenseffects", Kind::Bool,   "1", 0, 0, nullptr },
+        { "display.textureanisotropy", Kind::Float, "16", 1, 16, nullptr },
         { "display.disablemetaasw",     Kind::Bool,   "1", 0, 0, nullptr },   // Meta's ASW off for this game (MetaAsw)
         { "display.menuscreen",         Kind::Bool,   "1", 0, 0, nullptr },
         { "display.menuscreensize",     Kind::Float,  "62", 30, 110, nullptr },
@@ -200,6 +203,13 @@ std::vector<std::string> Settings::PackageCommands()
     // Camera motion blur smears the whole view each time the head-driven camera turns: off in VR (the game keeps it
     // in its own config afterwards, as if it had been unticked in the options).
     if (B("display.disablemotionblur")) c.push_back("exec r_skipCameraMotionBlur 1");
+    if (B("display.disabledepthoffield")) c.push_back("set r_skipDOF 1");
+    if (B("display.disablelenseffects")) {
+        c.push_back("set r_skipLensFlares 1");
+        c.push_back("set r_skipEmissiveGlare 1");
+        c.push_back("set r_skipBloom 1");
+    }
+    c.push_back(fmt::format("set image_anisotropy {}", (int)F("display.textureanisotropy")));
     // `vr autoall 1` (the development command) also switches infinite mana, ammo and items on; the ini's own switches
     // decide each one after it, so "everything unlocked" does not have to mean "nothing runs out" (release 1.0: unlocked
     // + infinite mana, ammo and health normal). Same frame, before any tick: an infinite switched off here never acts.
