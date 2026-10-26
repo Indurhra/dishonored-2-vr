@@ -391,3 +391,9 @@ beta until it has been played on more headsets and runtimes.
   menu button, OpenXR 1.0 requested.
 - Known in this version and fixed in 0.2.0: blurry, "zoomed-in" picture; menus filling the whole view and following
   the head; cutscenes not following the head.
+
+### 2026-10-26: repair legacy cheat-granted story Heart
+
+`vr repairheart` is an explicit, one-shot recovery command for a save that already owns the ordinary Heart before its first Void pickup. It removes exactly one `models/items/heart/heart.inventoryitem` through the supported game's native inventory removal function (RVA 0x614750), guarded by build, function bytes, active gameplay and quantity checks. It never runs automatically and must not be used after the legitimate pickup. Delilah Hearts and other equipment are untouched. Current UnlockEverything already excludes the Heart; older saves can retain a previously granted copy.
+
+Validated in the user's first-Void checkpoint with the mock OpenXR runtime: native removal returned 1 and inventory quantity changed from 1 to 0. Saved a separate pre-pickup quicksave (SLOT33, A Strange Visit, 26 October 2026 15:48), with original saves backed up. Actual story pickup/right-grip completion remains a headset check. Six host tests pass; they do not substitute for the story interaction check.

@@ -68,8 +68,9 @@ namespace TestAids
     //! Ammo, gadgets and elixirs topped back up to the most held of each while 1.
     void SetInfiniteItems(int on);
     //! Everything for the player's character: the mark, every power, every power upgrade and enhancement, every
-    //! equipment upgrade, the pistol and crossbow, the Heart, the spyglass, ammo, gadgets and elixirs filled up.
+    //! equipment upgrade, the pistol and crossbow, the spyglass, ammo, gadgets and elixirs filled up.
     void GiveAll();
+    void RepairStoryHeart(); // explicit one-shot: remove a cheated Heart before its first story pickup
     //! GiveAll for every new player (each load / level change, ~3 s in), plus infinite mana, ammo and items. For
     //! DVR_autoexec.txt: what is given lives in the session (and in any save made after it), a load forgets it.
     void SetAutoAll(int on);

@@ -219,9 +219,10 @@ namespace
     //! which is at the compiler's nesting limit.
     bool AidCommand(const std::string& what, std::istringstream& ss)
     {
-        if (what != "givemark" && what != "givepower" && what != "giveupgrade" && what != "items" && what != "decls" && what != "giveequip" && what != "giveitem" && what != "ammo" && what != "infitems" && what != "giveall" && what != "autoall" && what != "mana" && what != "hp" && what != "autopowers" && what != "possessview" && what != "shadowarms" && what != "handfx" && what != "handfxlog") return false;
+        if (what != "repairheart" && what != "givemark" && what != "givepower" && what != "giveupgrade" && what != "items" && what != "decls" && what != "giveequip" && what != "giveitem" && what != "ammo" && what != "infitems" && what != "giveall" && what != "autoall" && what != "mana" && what != "hp" && what != "autopowers" && what != "possessview" && what != "shadowarms" && what != "handfx" && what != "handfxlog") return false;
         std::string n; ss >> n;
-        if (what == "givemark") { TestAids::GiveMark(); LOGI("cmd vr givemark"); }
+        if (what == "repairheart") { TestAids::RepairStoryHeart(); }
+        else if (what == "givemark") { TestAids::GiveMark(); LOGI("cmd vr givemark"); }
         else if (what == "giveupgrade") { TestAids::GiveUpgrade(n); LOGI("cmd vr giveupgrade {}", n); }
         else if (what == "givepower") { TestAids::GivePower(n); LOGI("cmd vr givepower {}", n); }
         else if (what == "items") { TestAids::ListItems(n); LOGI("cmd vr items {}", n); }

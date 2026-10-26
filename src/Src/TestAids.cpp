@@ -202,6 +202,25 @@ namespace
         uint8_t* inv = (uint8_t*)GetComponent(player, BodyHide::kEquipCpntTypeInfo);
         if (!inv) { LOGI("TestAids: no player inventory (player {})", player); return; }
         const uintptr_t base = GameInfo::Base();
+        if (a.kind == 10)
+        {
+            // Explicit one-shot repair for a pre-granted Heart blocking the first
+            // Void pickup. Never run automatically on loads or later story Hearts.
+            if(!GameInfo::IsSupportedBuild() || GpuTrace::FirstPersonDraws()==0)
+            { LOGI("HeartRepair: requires active gameplay");return; }
+            const unsigned char expected[]={0x4c,0x8b,0xdc,0x57,0x48,0x83,0xec,0x60};
+            if(memcmp((void*)(base+0x614750),expected,sizeof(expected)))
+            { LOGI("HeartRepair: removal routine differs; refused");return; }
+            ForEachItem(inv,[&](const void* decl,const std::string& name) {
+                if(name!="models/items/heart/heart.inventoryitem") return;
+                const int before=Quantity(inv,decl);
+                if(before!=1) { LOGI("HeartRepair: no single owned Heart to remove (quantity {})",before);return; }
+                using RemoveFn=int(*)(void*,const void*,unsigned);
+                const int removed=((RemoveFn)(base+0x614750))(inv,decl,1);
+                LOGI("HeartRepair: native remove result {}, quantity {} -> {}; take the story Heart normally",removed,before,Quantity(inv,decl));
+            });
+            return;
+        }
         if (a.kind == 0)
         {
             void* mark = GetComponent(player, TestAids::kOutsiderMarkCpntTypeInfo);
@@ -489,6 +508,7 @@ void TestAids::ListItems(const std::string& filter) { std::lock_guard lk(g_M); g
 void TestAids::ListDecls(const std::string& filter) { std::lock_guard lk(g_M); g_Actions.push_back({ 4, filter }); }
 void TestAids::GiveEquip(const std::string& filter) { std::lock_guard lk(g_M); g_Actions.push_back({ 5, filter.empty() ? "list" : filter }); }
 void TestAids::GiveItem(const std::string& arg) { std::lock_guard lk(g_M); g_Actions.push_back({ 6, arg }); }
+void TestAids::RepairStoryHeart() { std::lock_guard lk(g_M);g_Actions.push_back({10,{}}); }
 void TestAids::GiveAll() { std::lock_guard lk(g_M); g_Actions.push_back({ 7, {} }); }
 void TestAids::SetAutoAll(int on)
 {
