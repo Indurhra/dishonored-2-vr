@@ -1,5 +1,73 @@
 # Continuation assessment - 2026-10-26
 
+## Frame-cap and hand calibration checkpoint (supersedes earlier uncertainties)
+
+Commits use the user-authorized identity Indurhra <Shakozipred@googlemail.com>.
+6891620 adds Display.StereoFrameLimit (default 0, opt-in engine frames/s,
+30..300; 240 tested). The native visual-settings limiter reads
+com_timeScaler * 30. IDA traced options values through 0x5127B0/0x512000,
+the limiter at 0x462E0, and its call site at 0x359240. This is the frame
+limiter despite the cvar's misleading name; the traced float references were
+limiter/UI/screenshot paths, not a simulation-speed control. Numeric cvar slots
+are temporarily changed; the archived string/config is retained. Leaving
+synchronized stereo restores the previous numeric value only if still ours.
+A game-options edit is preserved. This replaces the earlier unproven-cap finding.
+
+14a5595 adds Display.HandScale (default 1, range .65..1.15), vr handscale,
+and portable affine-calibration checks. Empty/casting hand geometry scales
+about its tracked palm. The wrist/IK target follows that scale; current and
+previous palettes and corrected attachment positions use the same saved
+calibration, while joint rotations remain rigid. Learned equipped grips keep
+native size. This does NOT establish smaller equipped hands, shorter arms,
+or correct subjective hand size; those remain separate calibration work.
+
+Simulator session local/sim-session-20261026-114312 used the isolated mock
+runtime, 3072x3264 recommendation, stereo 3286x3555 per eye, render scale 1,
+unchanged graphics, and the loaded Dunwall room. Candidate automatic startup
+applied engine cap 240 and hand scale .85. The 12-second steady sample ranged
+around 186..188 Presents/s (about 5.3ms/frame), approximately 93..94 complete
+new stereo pairs/s (10.6..10.8ms/pair), versus stock 120 Presents/s /60 pairs/s.
+Do not call this 188 headset FPS. During the sample stagefail/unpaired/dropped,
+TAA phase disagreement and stereo fallbacks were zero. Returning to mono
+restored 120 FPS (8.33ms/frame), at 3817x3895 mono; returning to stereo reapplied
+the higher cap and restored about188 Presents/s. Two unpaired views were counted
+across the deliberate mode transition, not during the steady sample. No crash.
+Capture operations are excluded from steady measurements. The heartbeat's GPU
+ms label is a timestamp interval, not a separate GPU-work benchmark.
+
+Matched hand_native_stereo / hand_small_stereo eye captures were visually
+inspected; .85 reduces hand size. Native animation continues between captures,
+so these are not a pixel-perfect pose-locked A/B. BodyView's corrected palm
+matches its controller target to logged precision (approximately .1mm), although
+its diagnostic real-arm reference is in another frame and should not be compared
+directly to eye-relative game coordinates. Portable host calibration tests pass,
+including a rotated/translated palm, distance scaling, limits and NaN handling:
+FPS not measured. Release compilation passed with the existing conversion
+warnings. No equipped, moving-head, interaction, death/load or headset comfort
+verdict has been established for the hand change. Experimental defaults remain
+off/identity; do not describe this checkpoint as all requested work complete.
+
+Normal headset DLL/INI, prior logs, config and saves were restored and verified
+by local/update-0.5.0/restore-after-simulator.ps1; zero save files changed.
+Restoration evidence is in that session's restoration.json. The official DLL
+SHA256 remains 53CE4AF1105E601F78C9480035503EC1D0E4754C2F4F0A4639952B89D7848048.
+The runtime override is absent after restoration. Simulator source/IDA outputs,
+images and generated builds are ignored local evidence; never commit game code.
+
+Targeted wheel investigation (implementation still pending): the actual UI owner
+is arkGameLogicStatePowerwheel, not the small player state. Its own StartBendTime
+0x4F7490 acquires a token at state+232; StopBendTime 0x4F7530 releases only that
+token. A future live option must isolate this pair, preserve power effects and
+ordinary pause, and verify lifecycle/reentrancy before use. Native population
+0x4F5360 walks the player's inventory, checks availability via 0x4F5BF0 and
+creates a 40-byte slot list at state+4048/count+4056. WheelClosing 0x4F64B0 calls
+0x4F5710: reads wheelData.selectedInventoryIndex, finds that itemIndex in the
+native list and calls native equip 0x7FB350 with its two declaration pointers.
+Negative selection cancels equip. This establishes inventory/equip authority;
+it does not establish a safe direct UI highlight setter or stable VR input.
+Do not substitute an independent inventory or equip a declaration by guesswork.
+Scripted-arm smooth handback and live-wheel interaction remain pending.
+
 ## HUD correction candidate
 
 Added experimental Display.StereoHud (default 0), live toggle
