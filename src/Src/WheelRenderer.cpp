@@ -91,6 +91,10 @@ void WheelRenderer::Draw(const std::vector<WheelModel::Item>& items,int page,int
         if(equipped) dl->AddCircleFilled(ImVec2(p.x,p.y-88),3.5f,ivory,16);
         if(chosen)
         {
+            dl->AddCircleFilled(p,diameter*.54f,IM_COL32(240,185,70,45),64);
+            dl->AddCircle(p,diameter*.57f,IM_COL32(255,211,101,255),64,5.f);
+            dl->AddLine(ImVec2(512+265*std::sin(angle),512-265*std::cos(angle)),
+                        ImVec2(512+285*std::sin(angle),512-285*std::cos(angle)),IM_COL32(255,211,101,255),5.f);
             Image(1121,ImVec2(512+242*std::sin(angle),512-242*std::cos(angle)),ImVec2(66,30),ivory,angle);
         }
     }
@@ -105,9 +109,11 @@ void WheelRenderer::Draw(const std::vector<WheelModel::Item>& items,int page,int
     }
     if(pages>1)
     {
+        Text("Page "+std::to_string(page+1)+" / "+std::to_string(pages),ImVec2(512,700),24,ivory);
+        Text("Left trigger: next page",ImVec2(512,740),20,muted);
         for(int i=0;i<pages;++i)
         {
-            const ImVec2 p(512+(i-(pages-1)*.5f)*22,708);
+            const ImVec2 p(512+(i-(pages-1)*.5f)*22,770);
             if(i==page) dl->AddCircleFilled(p,3.5f,ivory,16);else dl->AddCircle(p,3.f,muted,16,1.f);
         }
     }
