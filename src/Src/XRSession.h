@@ -57,6 +57,7 @@ struct XRPanelLayer
     float crop[4] = {};                        //!< x, y, w, h of the source shown, pixels
     bool premultiplied = false;                //!< the source's alpha is coverage (interface); else it is opaque
     bool gamma = false;                        //!< ...gamma-encoded and premultiplied in gamma space (WristHud::Texture)
+    bool headLocked = false;                   //!< pose in VIEW space, independent of scene eye rotations
     float alpha = 0;                           //!< overall opacity (fades); 0 = no layer
     float corner = 0;                          //!< corner radius, fraction of the quad's height
     float soft = 0;                            //!< alpha ramps to 0 over this width at the edges, fraction of the height

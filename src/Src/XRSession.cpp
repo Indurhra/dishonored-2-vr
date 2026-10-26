@@ -2241,7 +2241,7 @@ bool XRSession::AppendPanelLayer(int slot, XrCompositionLayerQuad& quad)
     xrReleaseSwapchainImage(g.panelSwapchain[slot], &ri);
     if (!drawn) return false;
     quad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;   // premultiplied (the default)
-    quad.space = g.space;
+    quad.space = l.headLocked ? g.viewSpace : g.space;
     quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
     quad.subImage.swapchain = g.panelSwapchain[slot];
     quad.subImage.imageRect.offset = { 0, 0 };

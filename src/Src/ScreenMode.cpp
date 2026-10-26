@@ -34,6 +34,7 @@ namespace
         float glow = 1.f;           // the screen's light spill on the surroundings
         float corner = 0.018f;      // corner radius, fraction of the screen's height
         float density = 28.f;       // px per degree of the screen's swapchain (sampled by the compositor at display resolution)
+        int stereoHud = 0;          // vr screencfg stereohud: opt-in gameplay HUD in a shared VIEW-space plane
         int wheel = 1;              // the power wheel on a panel; 0 = left in the picture
         float wheelSize = 72.f;     // deg: width of the game's whole interface frame on the wheel's panel (the ring is ~40% of it)
         float wheelDist = 1.5f;     // m
@@ -228,7 +229,8 @@ bool ScreenMode::OnXrFrame(XRSession& xr, ID3D11Texture2D* bb, bool imageFlat, b
     ID3D11ShaderResourceView* wsrv = WristHud::Texture(wtw, wth, &wgamma);
     g_Flat = g_Kind == kScreen;
     g_Wheel = g_Kind == kWheel;
-    g_Lift = g_Kind == kWheel && g_C.wheel != 0 && wsrv && wtw && wth;
+    g_Lift = ((g_Kind == kWheel && g_C.wheel != 0) ||
+              (g_Kind == kPlay && g_C.stereoHud != 0 && VRRuntime::Stereo())) && wsrv && wtw && wth;
 
     // ---- what this frame shows ----
     // A picture rendered flat is shown on the screen even once play has resumed (the pipeline is deeper than one
@@ -320,7 +322,7 @@ bool ScreenMode::OnXrFrame(XRSession& xr, ID3D11Texture2D* bb, bool imageFlat, b
     }
     g_LastGame = now;
     if (g_C.fadeOut > 0.f && now - g_GameSince < g_C.fadeOut) xr.SetFrameFade(g_ExitFrom + (1.f - g_ExitFrom) * Ease((float)((now - g_GameSince) / g_C.fadeOut)));
-    if (g_Lift.load() && head)
+    if (g_Kind == kWheel && g_Lift.load() && head)
     {   // the wheel: the game's interface on a panel where it was opened
         if (!g_WheelAt.valid) g_WheelAt = Ahead(hp, hq, g_C.wheelDist, g_C.wheelPitchMin, g_C.wheelPitchMax);
         g_WheelAlpha = g_C.wheelFade > 0.f ? std::min(1.f, g_WheelAlpha + dt / g_C.wheelFade) : 1.f;
@@ -340,6 +342,19 @@ bool ScreenMode::OnXrFrame(XRSession& xr, ID3D11Texture2D* bb, bool imageFlat, b
         g_S.wheelPanels++;
     }
     else if (g_Kind != kWheel) g_WheelAt.valid = false;
+    if (g_Kind == kPlay && g_Lift.load() && wsrv)
+    {
+        // Screen-space UI must not inherit the two scene cameras' opposing turns.
+        // Reuse the wheel slot: gameplay and wheel are mutually exclusive owners.
+        XRPanelLayer l;
+        l.srv = wsrv; l.srcW = wtw; l.srcH = wth;
+        l.crop[2] = (float)wtw; l.crop[3] = (float)wth;
+        l.premultiplied = true; l.gamma = wgamma; l.alpha = 1.f;
+        l.headLocked = true; l.pos[2] = -2.f;
+        l.width = 3.2f; l.height = l.width * (float)wth / (float)wtw;
+        l.outW = wtw; l.outH = wth;
+        xr.SetPanelLayer(1, l);
+    }
     return false;
 }
 
@@ -361,6 +376,7 @@ bool ScreenMode::Set(const std::string& k, float v)
     else if (k == "fadein") c.fadeIn = v; else if (k == "fadeout") c.fadeOut = v;
     else if (k == "backdrop") c.backdrop = std::clamp(v, 0.f, 1.f); else if (k == "env") c.env = std::clamp(v, 0.f, 4.f); else if (k == "glow") c.glow = std::clamp(v, 0.f, 4.f);
     else if (k == "corner") c.corner = std::clamp(v, 0.f, 0.5f); else if (k == "density") c.density = std::clamp(v, 8.f, 64.f);
+    else if (k == "stereohud") c.stereoHud = v != 0.f;
     else if (k == "wheel") c.wheel = (int)v; else if (k == "wheelsize") c.wheelSize = std::clamp(v, 20.f, 120.f); else if (k == "wheeldist") c.wheelDist = std::clamp(v, 0.4f, 10.f);
     else if (k == "wheelpitchmin") c.wheelPitchMin = v; else if (k == "wheelpitchmax") c.wheelPitchMax = v; else if (k == "wheelfade") c.wheelFade = v;
     else if (k == "shopcrop") c.shopCrop = std::clamp((int)v, 0, 2);
@@ -374,9 +390,9 @@ std::string ScreenMode::Config()
     std::lock_guard lk(g_M);
     const Cfg& c = g_C;
     return fmt::format("size {} dist {} pitchmin {} pitchmax {} follow {} followdelay {} glide {} fadein {} fadeout {} backdrop {} env {} glow {} corner {} density {} "
-                       "wheel {} wheelsize {} wheeldist {} wheelpitchmin {} wheelpitchmax {} wheelfade {} shopcrop {} enter {} exit {}",
+                       "stereohud {} wheel {} wheelsize {} wheeldist {} wheelpitchmin {} wheelpitchmax {} wheelfade {} shopcrop {} enter {} exit {}",
                        c.size, c.dist, c.pitchMin, c.pitchMax, c.follow, c.followDelay, c.glide, c.fadeIn, c.fadeOut, c.backdrop, c.env, c.glow, c.corner, c.density,
-                       c.wheel, c.wheelSize, c.wheelDist, c.wheelPitchMin, c.wheelPitchMax, c.wheelFade, c.shopCrop, c.enterFrames, c.exitFrames);
+                       c.stereoHud, c.wheel, c.wheelSize, c.wheelDist, c.wheelPitchMin, c.wheelPitchMax, c.wheelFade, c.shopCrop, c.enterFrames, c.exitFrames);
 }
 
 bool ScreenMode::Command(const std::string& what, std::istringstream& ss)

@@ -35,6 +35,7 @@ namespace
         { "display.wristhudsize",       Kind::Float,  "8.5", 4, 15, nullptr },
         // 0 mono, 1 synchronised stereo, 2 the alternating stereo of 1.0 (whose ini had 1 / true for that one: it gets
         // the synchronised one now, which is what 1 meant to the player)
+        { "display.stereohud",          Kind::Bool, "0", 0, 0, nullptr },
         { "display.stereo3d",           Kind::Choice, "1", 0, 0, "0|1|2|true|false|on|off|yes|no" },
         { "display.renderscale",        Kind::Float,  "1", 0, 2, nullptr },
         { "display.highresolution",     Kind::Bool,   "0", 0, 0, nullptr },   // 0.1.0's ini; replaced by RenderScale
@@ -162,6 +163,7 @@ std::vector<std::string> Settings::StartupCommands()
     // cutscenes in the engine: the game's letterbox, and whose arms
     c.push_back(B("display.cutsceneletterbox") ? "vr cinebars 0" : "vr cinebars 1");
     c.push_back(B("display.cutscenearms") ? "vr cinearms 1" : "vr cinearms 0");
+    c.push_back(B("display.stereohud") ? "vr screencfg stereohud 1" : "vr screencfg stereohud 0");
     // the headset's frames when the game or the runtime stalls
     c.push_back(B("advanced.keepaliveframes") ? "vr keepalive 1" : "vr keepalive 0");
     c.push_back(fmt::format("vr xrkick {}", F("advanced.newsessionafter")));

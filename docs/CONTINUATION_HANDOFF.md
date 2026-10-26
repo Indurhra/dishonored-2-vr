@@ -1,5 +1,30 @@
 # Continuation assessment - 2026-10-26
 
+## HUD correction candidate
+
+Added experimental Display.StereoHud (default 0), live toggle
+vr screencfg stereohud 0|1. In stereo gameplay, native UI draws are captured and
+lifted using the existing wheel path and submitted once as a VIEW-space quad
+at 2 m, 3.2 m wide. Its complete source extent is retained. Scene eye projections
+and resolution remain unchanged. Menu and wheel keep their existing placement;
+the mutually exclusive gameplay/wheel owners share panel slot 1. The centre dot
+is on the HUD plane, not at scene-target depth. Headset comfort remains untested.
+
+MSVC x64 Release build passed (existing wchar-to-char warnings). Simulator
+candidate v0.5.0-1-gbeea82d-dirty: 3072x3264 recommendation, engine3286x3555 per
+eye, scale1, about120 Presents/s (8.33ms) /60 new stereo pairs/s (16.7ms).
+Compared toggle off/on in the same loaded scene; no steady rate loss observed.
+Per-eye compositor capture hud_fixed: one projection plus one shared quad.
+Red HUD pixel centroids, reconstructed onto that plane, agree within 0.12mm
+horizontally and 0.60mm vertically. Both complete arcs are in view. This replaces
+the roughly13-degree mismatch seen on the stock path. Raw scene captures have
+UI lifted; compositor captures show UI on its own layer. Wheel open/close and
+pause/resume return to the appropriate owner without a stuck lift; game state
+returns to mode play/sim1. No crash, phase mismatch or stereo fallback observed.
+Capture operations excluded from performance samples. Perceptual headset verdict
+and more gameplay HUD families still pending. Candidate is not installed for
+normal headset use; simulator restoration retains the official release backup.
+
 ## First headset report and authorized simulator investigation
 
 User reports world perspective acceptable after update, low apparent frame rate,
