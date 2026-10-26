@@ -1,3 +1,8 @@
+> **Indurhra development fork:** Contains the controller weapon wheel, hand calibration,
+> controller-operated VR menu, rendering diagnostics/fixes, story Heart repair, and
+> left-only PSVR2 adaptive triggers developed from Cosmic Tangerine's mod.
+> See [fork status](docs/FORK-STATUS.md) for validation limits and experimental work.
+> This is development source, not a claim that all rendering or performance issues are resolved.
 # Dishonored 2 VR
 
 A native VR mod for **Dishonored 2** (Arkane Studios, 2016): play the whole game in a PC VR headset with motion

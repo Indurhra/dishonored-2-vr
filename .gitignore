@@ -8,3 +8,4 @@ tools/__pycache__/
 dist/
 build-mockxr/
 tools/.disp_cache.pkl
+build-mockxr-isolated/

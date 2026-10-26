@@ -217,3 +217,142 @@ Evidence and current-install backup: local/half-rate/. This reproduces and fixes
 one mechanism giving precisely the reported lock. Actual SteamVR lock removal
 requires a headset run; simulator results do not establish 90 FPS in this newer
 scene. No trigger, body, lens-effect, resolution or SteamVR-setting changes.
+
+## Real PSVR2 half-rate diagnosis (evening, 26 October)
+
+Real SteamVR/OpenXR PSVR2, 90 Hz, native synchronous stereo, DLL 0baafff.
+Eyes 3076x3140, engine 2872x3743. The engine cap stayed at 240; the earlier
+cap repair was not sufficient to resolve this actual headset lock.
+
+Controlled same-process, same-scene A/B/A/B test:
+
+| SteamVR asynchronous mode | Stereo FPS | Desktop Present mean | Compositor observation |
+| --- | --- | --- | --- |
+| Enabled (baseline) | 45–46 | ~6.4 ms | two presents per frame, async flag 4 |
+| Disabled | ~90 | ~0.11 ms | one present per frame |
+| Re-enabled | ~45.4 | ~6.37 ms | half-rate returns |
+| Disabled again | ~89.5–90 | ~0.12 ms | one present, flags 0, no drops in sampled frames |
+
+The causal workaround is per-application `disableAsync=true`, exposed by this
+SteamVR build as **Use Legacy Reprojection Mode**. Motion smoothing was already
+off; disabling it alone does not disable the asynchronous compositor path.
+Explicit `framesToThrottle=0` and `additionalFramesToPredict=0` alone did not
+resolve the lock. Keep `motionSmoothingOverride=2` (off).
+
+This isolates an interaction with the SteamVR asynchronous presentation path.
+It does not yet identify the precise internal SteamVR/driver defect. The game
+has enough throughput for 90 native stereo in this tested scene. The small
+fpsVR GPU numbers are not complete engine-render timings: frame submission
+starts after much of the engine work. Do not interpret them as total frame cost.
+
+NVIDIA VSync was globally forced on. Testing application-controlled VSync did
+not remove the lock. That global experiment was restored to its original value;
+the SteamVR workaround continued to produce ~90 FPS. No mod DLL changes were
+needed for this result. Fresh-process behaviour with the restored NVIDIA value
+has not yet been separately tested.
+
+User reports the issue across their PSVR2 VR games, without remembering titles.
+Applied the workaround to 22 existing identifiable game profiles, backing up
+all original values. Removed explicit half-rate limits found in Ready or Not,
+Skyrim VR and Cemu. Other games are configured, not performance-validated.
+These profiles apply when those games use SteamVR, regardless of headset;
+Quest VDXR does not use them. Unknown/unidentified profiles and utility apps
+were not modified. New game profiles do not inherit this per-app workaround.
+
+Evidence, complete affected-game list and backups are in
+`local/psvr2-system-investigation/`: `controlled-abab.log`, three heartbeat
+snapshots, `steamvr-before-live-tests.json`, `game-profiles-before.json`,
+`game-profiles-applied.json`, and `global-vsync-before.json` (already restored).
+The game remains running for the user's visual test. Trigger effects unchanged.
+Disabling async can change judder behaviour if a heavier scene misses refresh;
+this is a verified half-rate workaround, not a guarantee of 90 FPS everywhere.
+
+## Follow-up: full user test and fresh-session checks
+
+The complete 19:56–20:22 session contains the earlier async A/B tests; its
+aggregate reprojection percentage cannot describe only the user's later play.
+fpsVR reports median 89 FPS, average 84.22, 2,389 compositor drops, CPU p99 11.9 ms
+and p99.9 15.5 ms. GPU p99 is 1.7 ms, but this mod begins the OpenXR frame after
+engine rendering, so this number does not include all engine GPU work.
+
+Decoded fpsVR's binary history using its viewer's actual BinaryReader field
+layout (header uint16/int32; 30-byte per-second records). CSV retained locally.
+Approximate 20:12–20:22:30 interval: median per-second minimum/maximum FPS both
+90; 596/630 seconds have a maximum >=89, 20 have a minimum below 80. Several
+50–75 ms spikes align with journal/pause/load transitions. CPU temperature median
+72 C, p95 82 C. The two 99 C records still report 90 FPS and CPU maxima under
+8 ms, so these measurements do not establish thermal throttling as the cause.
+The history lacks separate per-second dropped/reprojection counters; do not
+claim the entire user test had zero reprojection.
+
+Fresh process 38548, original full resolution and restored original NVIDIA
+setting: 30-second initial capture 2,697 presents, zero drops/reprojections;
+second 20-second capture 1,797 presents, zero drops/reprojections. IMPORTANT:
+these were dashboard-visible/controller-untracked samples, not representative
+hand-active gameplay despite the second filename `controllers-baseline.json`.
+After dashboard closure: 30 seconds, 2,693 presents, 3 drops, zero reprojections;
+subsequent 60 seconds, 5,385 presents, 9 drops, zero reprojections (6 drops inside
+one timeout). Controllers still reported disconnected and `maxturn=0`; the
+filename `turn-test.json` is NOT evidence of a successful stick-turn test.
+
+NVIDIA utilisation was 88–97% at full scale, reduced to 67% in a temporary
+0.75-scale comparison. Both steady configurations reached 90. Restored scale
+1.0 and verified 2872x3743 engine size. No persistent graphics reduction.
+CPU boost ~158–160% of nominal, system-wide DPC ~0.24–0.29%; these short samples
+do not establish a scheduling/interrupt problem or exclude brief spikes.
+No BIOS, affinity, priority or power-plan modifications made.
+
+Prepared an opt-in `vr directturn 1` experiment: normal-play visual yaw uses the
+VR room anchor plus predicted head yaw rather than mouse-servo corrections.
+Keeps existing game pitch/roll, scripted-animation and possession handling,
+and the existing shared left/right pose. Default remains off. Built Release,
+eight existing host tests pass (these do NOT validate perceived camera motion).
+Not installed or visually verified yet; requires a controller-active movement
+test. The current installed DLL remains 0baafff. Do not describe this as a
+confirmed fix. All evidence/scripts under local/psvr2-system-investigation/.
+
+## External CPU / Process Lasso audit and reversible comparisons
+
+Read C:/ProgramData/ProcessLasso/config/prolasso.ini and enforcement log.
+ProBalance OocOn=false, efficiency mode rules empty, CPU limiter/throttle rules
+empty, SmartTrim disabled, persistent priorities empty. No affinity rule for
+Dishonored2.exe, vrserver.exe or vrcompositor.exe. vrmonitor.exe and several
+other games have 0-15 affinity rules. Current game uses all 32 logical CPUs;
+compositor/server priority High, game Normal. No relevant Lasso enforcement
+matching the game stalls. Existing Lasso rules were NOT changed.
+
+Windows CPU-set API confirms performance logical CPUs 0-15 (efficiency class 1),
+efficiency cores 16-31 (class 0). Tested only this game's current affinity,
+not a permanent Lasso rule. Same stationary game scene; headset active but
+controllers untracked, so these comparisons do not validate active-turn judder.
+Each capture lasted 30 seconds; frame counts below are compositor counters.
+
+| Test | Presents | Dropped | Reprojected | Client interval median / p99 ms |
+| --- | ---: | ---: | ---: | --- |
+| Original all cores A | 2697 | 0 | 0 | 6.978 / 8.241 |
+| Performance cores only B | 2695 | 2 | 0 | 6.696 / 7.791 |
+| Restored all cores A2 | 2696 | 0 | 0 | 6.974 / 8.271 |
+| Existing Bitsum Highest Performance plan | 2698 | 0 | 0 | 6.872 / 7.588 |
+| CAM interface BelowNormal priority | 2696 | 0 | 0 | 7.017 / 8.942 |
+
+All were approximately 90 FPS. Some p99 differences are small and do not prove
+an improvement to the reported symptom. Kept NONE of these changes. Restored
+affinity 0xffffffff, original Ultimate Performance GUID
+26436b6e-2c49-4b72-a133-506bec39f35d, and CAM PID22440 Normal priority. Never
+stopped cooling services or changed their configuration. Final restoration
+capture stored as external-restored-final.json.
+
+Other checks: ~13.7 GB available RAM, almost no hard paging, sampled disk latency
+~0.1-0.5 ms. No WHEA, display-driver reset or Kernel-Processor-Power event 37
+found in available System log over seven days. Brief DPC/interrupt samples do
+not show a sustained interrupt storm, but cannot exclude transient spikes.
+NZXT CAM/helper together used about 1.2 CPU-seconds in a 3-second background
+sample; Lasso GUI ~0.03 CPU-seconds. CAM priority test did not improve timing.
+Intel XTU service exists; previous-day log reports compatibility restrictions.
+No XTU, BIOS or voltage changes. Board MSI Z790 GAMING PLUS WIFI, BIOS H.80 dated
+2025-04-11. Boot timer configuration query was denied by Windows permissions;
+no boot changes attempted. Cannot claim all possible external causes ruled out.
+
+Unresolved: a representative moving-scene CPU scheduling/GPU trace and visual
+stick-turn test. The old 45 FPS lock remains reproducibly addressed by SteamVR
+async configuration; no new system-wide CPU fix was demonstrated by this audit.
