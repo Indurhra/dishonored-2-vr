@@ -7,6 +7,7 @@
 #include "Settings.h"
 #include "Game.h"
 #include "LiveWheel.h"
+#include "WheelHand.h"
 #include <d3d11.h>
 #include <algorithm>
 #include <cmath>
@@ -349,7 +350,7 @@ bool ScreenMode::OnXrFrame(XRSession& xr, ID3D11Texture2D* bb, bool imageFlat, b
             l.crop[0] = l.crop[1] = 0; l.crop[2] = l.crop[3] = 1024;
             // PNG artwork and ImGui colours are gamma-encoded, blended into
             // UNORM. Decode before the compositor's sRGB output conversion.
-            l.gamma = true; l.soft = 0; l.width = l.height = .75f;
+            l.gamma = true; l.soft = 0; l.width = l.height = WheelHand::Width;
             l.outW = l.outH = 1024;
         }
         xr.SetPanelLayer(1, l);

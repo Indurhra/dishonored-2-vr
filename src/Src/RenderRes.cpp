@@ -370,7 +370,7 @@ std::string RenderRes::Status()
 {
     int rw = 0, rh = 0; RealClient(rw, rh);
     const int* ds = g_Base ? (const int*)(g_Base + kDisplaySize) : nullptr;
-    return fmt::format("renderres target {}x{} ({}) engine {}x{} buffers {}x{} window {}x{} scale {:.2f} rs {} fps {:.1f} gpu {:.2f} ms applies {} spoofed {} bufs {} cfgguard {} placeguard {}",
+    return fmt::format("renderres target {}x{} ({}) engine {}x{} buffers {}x{} window {}x{} scale {:.2f} rs {} engine_fps {:.1f} gpu_present_interval {:.2f} ms (includes idle, not GPU render cost) applies {} spoofed {} bufs {} cfgguard {} placeguard {}",
                        g_TW.load(), g_TH.load(), g_Why, ds ? ds[0] : 0, ds ? ds[1] : 0, g_BufW, g_BufH, rw, rh, g_Scale.load(),
                        CVars::GetInt("rs_enable", -1), g_Fps, g_GpuMs, g_Applies, g_Spoofed, g_Buffers, g_CfgGuards, g_PlaceGuards);
 }

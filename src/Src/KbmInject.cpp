@@ -1082,10 +1082,11 @@ void KbmInject::Tick()
         if (LiveWheel::Active())
         {
             MenuButton(live,g_QuickSlots.load()!=0);
-            const float lm=in.moveX*in.moveX+in.moveY*in.moveY, rm=in.turnX*in.turnX+in.turnY*in.turnY;
-            const float sx=rm>=lm ? in.turnX : in.moveX, sy=rm>=lm ? in.turnY : in.moveY;
-            const bool tracked=in.hand[0].valid && !in.hand[0].held && !VRRuntime::GetEyePose(0).held;
-            const bool close=LiveWheel::Input(sx,sy,gripL,(pressed & kXRBtnB)!=0,tracked,(pressed & kXRBtnY) ? 1 : (pressed & kXRBtnX) ? -1 : 0);
+            // The opening left GRIP position is the dial centre, as in D1 VR.
+            // Sticks cannot override hand selection while the custom wheel is up.
+            const float hand[3]={in.leftGrip.posX,in.leftGrip.posY,in.leftGrip.posZ};
+            const bool tracked=in.leftGrip.valid && !in.leftGrip.held && !VRRuntime::GetEyePose(0).held;
+            const bool close=LiveWheel::Input(hand,gripL,(pressed & kXRBtnB)!=0,tracked,(pressed & kXRBtnY) ? 1 : (pressed & kXRBtnX) ? -1 : 0);
             if (close) g_Latched |= kVGripL;
             Hold(kMMB,gripL && !close);
             if(!close)

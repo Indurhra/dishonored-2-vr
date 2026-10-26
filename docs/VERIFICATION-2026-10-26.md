@@ -85,3 +85,50 @@ in local/wheel-renders. These native images are previews, not yet integrated int
 the custom label-based live wheel. Game archives and extracted artwork are not
 included in source control. Format references: chipolux/disrev and the JPEXS
 IggyTextureMetadata/IggyTextureDecoder source.
+
+
+## PSVR2 hand wheel and frame pacing follow-up
+
+User confirmed trigger effects feel good; no trigger policy, effect, helper,
+or trigger configuration is changed. Latest hand controls supersede the stick
+controls in the historical verification above; see NATIVE-WHEEL-PREVIEW.md.
+
+The user's 0.5.0 announcement screenshot describes the synchronized stereo
+already enabled here (`Stereo3D=1`), not a missing update. It costs two engine
+renders per complete stereo pair; switching to mono would remove depth.
+
+Evidence retained from the real 15:05-15:15 SteamVR session: heartbeat reported
+22.22 ms predicted display period (a 45 Hz application interval); compositor
+reported target 90 and cumulative CPU 9.178 ms/GPU 0.718 ms. Those cumulative
+figures include menus and are not a gameplay benchmark. The heartbeat's 43.1 ms
+`pair gap` is pose prediction age, NOT measured stereo frame interval. The
+237.1 engine FPS at shutdown is after XR exit, NOT VR performance.
+
+The mod calls xrBeginFrame at Present, after the engine has rendered. Thus the
+runtime's GPU accounting does not reliably represent the full engine workload.
+Separately, RenderRes's former `gpu` value is the elapsed GPU timestamp interval
+between Presents, including idle; renamed `gpu_present_interval`. Added
+`stereo_fps` based on successful complete-pair submissions over a second, with
+stale samples cleared. This is application stereo throughput, not headset
+refresh or generated/reprojected frames.
+
+Confirmed code inefficiency: the frame pump requested its next xrWaitFrame only
+when the next finished image reached BeginFrame. After successful xrEndFrame it
+now requests the next wait immediately, overlapping the wait with engine work.
+Only one wait may be outstanding; the bounded wait, session-ending and quiet-game
+keep-alive paths are retained. Failed submissions do not prefetch. The periodic
+hand-palette diagnostic is limited to once per frame rather than once per draw.
+No reduction to render resolution, mono fallback, SteamVR profile changes or
+trigger changes is bundled with this experiment. Game VSync was already off.
+
+API basis: [Khronos frame synchronization](https://github.com/KhronosGroup/OpenXR-Docs/blob/main/specification/sources/chapters/rendering.adoc):
+xrWaitFrame may run on another thread, must be externally serialized, and the
+previous wait must have a matching begin. Requesting after successful end
+satisfies that ordering. The pump owns the sole wait call and hands off its
+frame state under its existing mutex.
+
+Validation: six host checks pass and the Release DLL builds. No live performance
+improvement is claimed yet; the user needs to launch and compare normal gameplay
+with the new stereo_fps reading. CPU engine cost, GPU engine cost and runtime
+throttling remain possible additional limits. Neither 90 Hz performance nor a
+complete cure for the reported low FPS has been established.

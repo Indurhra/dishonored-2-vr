@@ -40,6 +40,8 @@ namespace
     std::atomic<bool> g_TruePose{ true };
     VRRuntime::RenderPoseStats g_RP;   // under g_StatusMutex
     struct SyncStats { unsigned long long staged = 0, stageFailed = 0, pairs = 0, unpaired = 0, unpairedRight = 0, mono = 0, leftAlone = 0, dropped = 0, ownEye = 0; } g_Sync;   // under g_StatusMutex
+    double g_PairRateStart=0, g_PairRateLast=0, g_PairFps=0;
+    unsigned g_PairRateCount=0;
     // vr unpairedeye 1: a stereo eye's image that found no partner goes to ITS eye only, the other keeps its last image
     // (0 = to both eyes as mono, before 2026-10-23: with the per-eye turned frustum the other eye's outer edge was black)
     std::atomic<int> g_UnpairedOwn{ 1 };
@@ -459,6 +461,11 @@ void VRRuntime::OnPresent(IDXGISwapChain* sc)
                         // the desktop window: the left image again instead of the right one (it alternated: shaking)
                         if (g_MirrorEye.load() == 0 && g_Session.CopyPairLeft(bb)) g_Mirrored++;
                         std::lock_guard lk(g_StatusMutex); g_Sync.pairs++;
+                        const double now=NowS();
+                        if(!g_PairRateStart || now-g_PairRateLast>.5) { g_PairRateStart=now;g_PairRateCount=0;g_PairFps=0; }
+                        else ++g_PairRateCount;
+                        g_PairRateLast=now;
+                        if(now-g_PairRateStart>=1.) { g_PairFps=g_PairRateCount/(now-g_PairRateStart);g_PairRateCount=0;g_PairRateStart=now; }
                         g_RP.used++; if (source) g_RP.fromDraws++; if (source == 2) g_RP.fromExec++; if (rp.fromGameAxis) g_RP.gameAxis++;
                     }
                     else if (g_UnpairedOwn.load() && rp.valid && rp.eye >= 0 && g_Session.LastEyeTexture(rp.eye ^ 1))
@@ -692,9 +699,9 @@ int  VRRuntime::CurrentEye()
 std::string VRRuntime::SyncStatus()
 {
     std::lock_guard lk(g_StatusMutex);
-    return fmt::format("syncstereo staged {} stagefail {} pairs {} unpaired {} (right {}, own eye {} rule {}) mono {} leftalone {} dropped {} submitted {} backdropeyes {} | presented view by frame order, checked by its TAA: agree {} disagree {} no-taa {}",
+    return fmt::format("syncstereo staged {} stagefail {} pairs {} unpaired {} (right {}, own eye {} rule {}) mono {} leftalone {} dropped {} submitted {} backdropeyes {} | presented view by frame order, checked by its TAA: agree {} disagree {} no-taa {} | stereo_fps {:.1f}",
                        g_Sync.staged, g_Sync.stageFailed, g_Sync.pairs, g_Sync.unpaired, g_Sync.unpairedRight, g_Sync.ownEye, g_UnpairedOwn.load(), g_Sync.mono, g_Sync.leftAlone, g_Sync.dropped,
-                       g_Session.PairsSubmitted(), g_Session.BackdropEyes() ? 1 : 0, g_TaaAgree, g_TaaDisagree, g_TaaNone);
+                       g_Session.PairsSubmitted(), g_Session.BackdropEyes() ? 1 : 0, g_TaaAgree, g_TaaDisagree, g_TaaNone, NowS()-g_PairRateLast<.5 ? g_PairFps : 0.);
 }
 unsigned VRRuntime::RecenterEvents() { return g_Session.RecenterEvents(); }
 unsigned long long VRRuntime::LostFrames(int dev) { return g_Session.LostFrames(dev); }

@@ -14,7 +14,7 @@ namespace LiveWheel
     void RequestOpen();
     void Cancel();
     // Returns true when the binding must be released (cancel/lost tracking).
-    bool Input(float x, float y, bool held, bool cancel, bool tracked, int pageDelta);
+    bool Input(const float hand[3], bool held, bool cancel, bool tracked, int pageDelta);
     // Rendered in its own texture, never over the game's native wheel.
     bool Render(ID3D11Device* device, ID3D11DeviceContext* context);
     ID3D11ShaderResourceView* Texture();

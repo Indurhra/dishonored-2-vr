@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "LiveWheel.h"
 #include "WheelSelection.h"
+#include "WheelHand.h"
 #include "GameInfo.h"
 #include "Game.h"
 #include "VRRuntime.h"
@@ -44,7 +45,7 @@ namespace
     ID3D11ShaderResourceView* g_Srv=nullptr;
     unsigned g_Placed=~0u;
     unsigned g_ReferenceGen=0;
-    float g_Pos[3]={}, g_Quat[4]={0,0,0,1};
+    WheelHand g_Dial;
     constexpr unsigned kSize=1024;
     std::atomic<bool> g_Shot{false};
     std::string g_ShotTag;
@@ -204,11 +205,21 @@ bool LiveWheel::Enabled() { return g_Enabled.load(); }
 bool LiveWheel::Closed() { return g_Closed.load(); }
 void LiveWheel::RequestOpen() { if(Enabled()) g_Closed=false; }
 void LiveWheel::Cancel() { if(Active()) { g_Cancel=true;g_Confirm=false;g_Selected=-1; } }
-bool LiveWheel::Input(float x,float y,bool held,bool cancel,bool tracked,int pageDelta)
+bool LiveWheel::Input(const float hand[3],bool held,bool cancel,bool tracked,int pageDelta)
 {
     if (!Active()) return false;
-    if (g_Placed==g_Generation.load() && VRRuntime::GetHeadPose().gen!=g_ReferenceGen) tracked=false;
-    if (cancel || !tracked || !g_Ready) { g_Cancel=true; g_Selected=-1; g_Confirm=false; return true; }
+    const auto head=VRRuntime::GetHeadPose();
+    float x=0,y=0;
+    {
+        std::lock_guard lk(g_M);
+        if(g_Placed!=g_Generation.load())
+        {
+            if(!held || !tracked || !head.valid || head.held || !g_Dial.Capture(hand,head.pos)) tracked=false;
+            else { g_Placed=g_Generation.load();g_ReferenceGen=head.gen; }
+        }
+        if(!head.valid || head.held || head.gen!=g_ReferenceGen || !g_Dial.Direction(hand,x,y)) tracked=false;
+    }
+    if (cancel || !tracked) { g_Cancel=true; g_Selected=-1; g_Confirm=false; return true; }
     if (g_Cancel.load()) return true;
     {
         std::lock_guard lk(g_M);
@@ -219,7 +230,7 @@ bool LiveWheel::Input(float x,float y,bool held,bool cancel,bool tracked,int pag
         const int local=g_PageLatch ? -1 : WheelSelection::Pick(x,y,count,g_Selected.load()-start);
         g_Selected=local<0 ? -1 : start+local;
     }
-    if (g_Held && !held) g_Confirm=true;
+    if (g_Held && !held) g_Confirm=g_Ready.load();
     g_Held=held;
     return false;
 }
@@ -265,23 +276,9 @@ ID3D11ShaderResourceView* LiveWheel::Texture() { return Active() && g_Ready ? g_
 bool LiveWheel::PanelPose(float pos[3],float quat[4])
 {
     if (!Active()) return false;
-    const unsigned gen=g_Generation.load();
-    if (gen!=g_Placed)
-    {
-        const auto head=VRRuntime::GetHeadPose(); XRInputState in;
-        if (!head.valid || !VRRuntime::GetInput(in) || !in.hand[0].valid || in.hand[0].held) return false;
-        // Capture beside the opening hand, facing the head; stays fixed in LOCAL space.
-        float yaw=std::atan2(2*(head.quat[3]*head.quat[1]+head.quat[0]*head.quat[2]),1-2*(head.quat[1]*head.quat[1]+head.quat[2]*head.quat[2]));
-        const float f[3]={-std::sin(yaw),0,-std::cos(yaw)};
-        const float hand[3]={in.hand[0].posX,in.hand[0].posY,in.hand[0].posZ};
-        for(int i=0;i<3;++i) g_Pos[i]=head.pos[i]*.35f+hand[i]*.65f+f[i]*.50f;
-        const float forward=(g_Pos[0]-head.pos[0])*f[0]+(g_Pos[2]-head.pos[2])*f[2];
-        if(forward<.55f) for(int i=0;i<3;++i) g_Pos[i]+=f[i]*(.55f-forward);
-        g_Pos[1]=std::clamp(g_Pos[1],head.pos[1]-.4f,head.pos[1]+.15f);
-        g_ReferenceGen=head.gen;
-        g_Quat[0]=g_Quat[2]=0;g_Quat[1]=std::sin(yaw*.5f);g_Quat[3]=std::cos(yaw*.5f);g_Placed=gen;
-    }
-    memcpy(pos,g_Pos,12);memcpy(quat,g_Quat,16);return true;
+    std::lock_guard lk(g_M);
+    if(g_Placed!=g_Generation.load() || !g_Dial.valid) return false;
+    memcpy(pos,g_Dial.center,12);memcpy(quat,g_Dial.quat,16);return true;
 }
 bool LiveWheel::Command(const std::string& what,std::istringstream& ss)
 {

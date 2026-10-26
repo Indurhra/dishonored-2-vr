@@ -97,6 +97,7 @@ struct XRInputState
     float triggerL = 0.0f, triggerR = 0.0f; //!< 0..1
     float gripL = 0.0f, gripR = 0.0f;       //!< squeeze, 0..1
     unsigned buttons = 0;        //!< kXRBtn* mask (a/b/x/y, stick clicks)
+    XRHandPose leftGrip;         //!< raw left grip pose for the opening-hand wheel
     XRHandPose hand[2];          //!< 0 = left, 1 = right (aim pose)
     //! XrTime (ns) the poses were predicted for. Velocities come from differences of this, not of the wall clock:
     //! the poses are PREDICTED for the display time, so two frames' poses are one display period apart whatever
@@ -356,7 +357,7 @@ private:
     bool StopPump(unsigned waitMs);
     void KeepAliveFrame(const void* frameState);
     void SaveLayers(const void* layers, unsigned count);
-    void FrameEnded();
+    void FrameEnded(bool prepareNext = false);
     void EndSessionWhenFree();
     int m_InitAttempts = 0;
     std::string m_Profiles;

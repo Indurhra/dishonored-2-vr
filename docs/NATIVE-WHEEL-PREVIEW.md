@@ -4,8 +4,11 @@ This revision combines the game's original wheel textures with the existing VR
 hold/select/release interaction. It has eight items per page, a highlighted rim,
 selected-item illustration, native item name, ammo counts and page indicators.
 A 41% opacity dark backing fills the ring interior; the surroundings remain transparent and there is no full-screen veil.
-Left grip opens, the thumbstick selects, release confirms, B/centre cancels and
-X/Y changes pages. This revision does not add physical hand-hover selection.
+Left grip opens at the left grip position. Move that hand toward a segment and
+release to equip; B/return to the opening centre cancels. X/Y changes pages.
+The upright 35 cm panel stays at its opening position and faces the opening
+head position. Sticks do not select. The 2 mm neutral radius and direction-only
+selection match the D1 VR reference defaults.
 
 `WheelRenderer` is shared by the mod and `wheel_preview`. The preview uses D3D11
 WARP and a sample inventory; it is not a game capture or evidence of successful
@@ -15,7 +18,7 @@ native available inventory, localized names and counts instead.
 Artwork is chosen by primary/secondary item declaration paths, independent of
 localized labels and list position. The native inventory rebuild hook refreshes
 the snapshot on the engine thread. Count/name changes retain selection; changed
-item identity/order clears selection and requires a neutral thumbstick before
+item identity/order clears selection and requires returning the hand to the opening centre before
 another selection. Release resolves the current native entry and checks its
 identity again before calling the native equip controller. Unknown items retain
 their native label and equip path even without an artwork mapping.
@@ -67,3 +70,20 @@ DLL/INI are backed up at local/wheel-install-backup-20261026-143352.
 Installed DLL SHA256:
 FB50D0219A524262BF65AE7E6D383AA956B86F8A5F44ADF282C704DF9CEFD0E9.
 In-game verification is now pending the user's headset test.
+
+
+## Hand interaction revision (2026-10-26)
+
+Reference inspected: VR-Stereo-Hub/Dishonored-VR, VR-Main b15e4d32a,
+`src/core/input/weapon_dial.h` and `src/core/gfx/hud_layout.cpp`.
+D2 samples the existing left grip action space (not the aim ray), captures the
+opening plane in input, and shares that exact plane with the compositor panel.
+Head turns and wrist rotation cannot steer it. Movement along the plane normal
+cannot select. Tracking loss/recenter cancels rather than moving the centre.
+Release without a rendered panel cannot confirm. Existing native inventory,
+identity validation, page rearm, backdrop/artwork and trigger effects remain.
+
+Six host checks pass, including all eight sectors at twelve opening yaws,
+centre jitter, depth-only movement and invalid input. Release build passes.
+This interaction revision and the accompanying frame prefetch still need an
+in-game/headset run; prior simulator results above are not results for this DLL.

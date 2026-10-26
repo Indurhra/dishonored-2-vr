@@ -23,3 +23,7 @@ if(WIN32)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     add_test(NAME psvr2_bridge COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/psvr2_bridge_integration.py" "$<TARGET_FILE_DIR:dvr_psvr2_bridge_test>")
 endif()
+
+add_executable(wheel_hand WheelHandTests.cpp)
+target_compile_features(wheel_hand PRIVATE cxx_std_17)
+add_test(NAME wheel_hand COMMAND wheel_hand)

@@ -1222,6 +1222,12 @@ void XRSession::SyncInput()
         constexpr XrSpaceLocationFlags kBoth = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
         m_WristValid[s] = ws && XR_SUCCEEDED(xrLocateSpace(ws, g.space, g.frameState.predictedDisplayTime, &loc))
                        && (loc.locationFlags & kBoth) == kBoth;
+        if(s==0)
+        {
+            auto& h=m_Input.leftGrip;
+            h.valid=m_WristValid[s];h.held=!h.valid;
+            if(h.valid) { h.posX=loc.pose.position.x;h.posY=loc.pose.position.y;h.posZ=loc.pose.position.z; }
+        }
         if (m_WristValid[s])
         {
             const XrPosef& w = loc.pose;
@@ -2149,7 +2155,7 @@ void XRSession::EndFrameWithLayers(XrCompositionLayerProjection& layer)
 
     m_FrameStarted = false;
     m_FramesSubmitted++;
-    FrameEnded();
+    FrameEnded(XR_SUCCEEDED(er));
 }
 
 //! The wrist HUD quad (XRWristLayer): drawn into its own swapchain and placed in the wrist's action space, so the
@@ -2466,17 +2472,23 @@ void XRSession::EndFrameNoRender()
     if (XR_FAILED(er) && m_EndFrameFails++ < 10)
         LOGI("XRSession: xrEndFrame (no layers) FAILED {}{}", (int)er, m_EndFrameFails == 10 ? "; not logged again" : "");
     m_FrameStarted = false;
-    FrameEnded();
+    FrameEnded(XR_SUCCEEDED(er));
 }
 
 // ---------------- the OpenXR frame thread ----------------
 
 //! The render thread's frame is over (or never began): the frame thread may keep the headset fed and end the session.
-void XRSession::FrameEnded()
+void XRSession::FrameEnded(bool prepareNext)
 {
     std::lock_guard<std::mutex> lk(pump.m);
     pump.mainOpen = false;
     pump.lastMainEnd = NowSec();
+    // Begin the NEXT wait while the engine prepares its images, rather than
+    // adding a compositor wait after both eye renders have already completed.
+    // One outstanding wait only; consumption remains in BeginFrame and the
+    // existing quiet-game path consumes a prepared frame during a long stall.
+    if(prepareNext && pump.thread && m_SessionRunning && !pump.quit && !pump.ending &&
+       !pump.endPending && !pump.waited && !pump.waiting) pump.request=true;
     pump.cv.notify_all();
 }
 
@@ -2722,7 +2734,7 @@ std::string XRSession::PumpStatus() const
     std::lock_guard<std::mutex> lk(pump.m);
     const double now = NowSec();
     return fmt::format("xrpump on {} waits {} gameframes {} keepalive {} frames {} runs {} longestrun {:.2f} timeouts {} runs {} longest {:.2f} "
-                       "longestwait {:.2f} imagetimeouts {} kicks {} waitfails {} bound {} kickafter {:.1f} waiting {} gameopen {} quiet {:.2f} mtlock {}",
+                       "longestwait {:.2f} imagetimeouts {} kicks {} waitfails {} bound {} kickafter {:.1f} waiting {} gameopen {} quiet {:.2f} mtlock {} prefetch 1",
                        pump.thread != nullptr, pump.waits, pump.mainFrames, m_KeepAliveMode, pump.keepAlives, pump.keepAliveRuns, pump.longestRun,
                        pump.mainTimeouts, pump.timeoutRuns, pump.longestTimeout, pump.longestWait, pump.imageTimeouts, pump.kicks, pump.waitFails,
                        m_WaitBoundMs, m_KickSec, pump.waiting, pump.mainOpen,

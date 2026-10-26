@@ -1481,7 +1481,11 @@ namespace
                             // is the pose the user validated, so if replaying the hold works, the two print the
                             // same rows. Measured here rather than judged from a screenshot: the hand is a fanned
                             // black glove and its apparent "direction" is not readable when the fingers splay.
-                            bool relLog = (g_PresentFrame % 180) == 0 && side == 0;
+                            // Deferred passes can revisit this palette dozens of times in one frame.
+                            // Emit the periodic diagnostic once, not once per draw.
+                            static std::atomic<unsigned long long> lastRelFrame{~0ull};
+                            bool relLog = (g_PresentFrame % 180) == 0 && side == 0 &&
+                                lastRelFrame.exchange(g_PresentFrame) != g_PresentFrame;
                             if (!relLog && g_RelLogLeft.load() > 0) { relLog = true; g_RelLogLeft--; }
                             const int whits = g_WeaponHits[side].load();
                             float entPalm = -1.f;
