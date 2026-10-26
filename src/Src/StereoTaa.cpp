@@ -332,8 +332,15 @@ namespace
                 if (s.buf == cb && s.stamp && (!best || (s.ctx == c) > (best->ctx == c) || ((s.ctx == c) == (best->ctx == c) && s.stamp > best->stamp))) best = &s;
             if (best) { memcpy(m, best->m, 64); have = true; }
         }
+        if (!have) { auto missing=++g_NoShadow;
+            if(missing<=8) {
+                D3D11_BUFFER_DESC bd{}; cb->GetDesc(&bd); void** vt=*(void***)c;
+                LOGI("StereoTaa: missing bound shadow cb={} context={} type={} bytes={} usage={} cpu={} knownWrites={} Map={} Unmap={} Update={}", (void*)cb,(void*)c,(int)c->GetType(),bd.ByteWidth,(int)bd.Usage,bd.CPUAccessFlags,g_CandidateWrites.load(),vt[14],vt[15],vt[48]);
+                std::lock_guard lock(g_SM);
+                for(auto& entry:g_Sh) if(entry.stamp) LOGI("StereoTaa: shadow candidate cb={} context={} stamp={}",entry.buf,entry.ctx,entry.stamp);
+            }
+            if (why) *why = "PerViewCB never seen written"; cb->Release(); return -3; }
         cb->Release();
-        if (!have) { g_NoShadow++; if (why) *why = "PerViewCB never seen written"; return -3; }
         std::lock_guard lk(g_VM);
         float bestErr = 1e9f; const ViewRec* bestRec = nullptr;
         for (auto& r : g_Ring)

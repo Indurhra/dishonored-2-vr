@@ -53,6 +53,8 @@ struct XRState
     // of the left palm, so -X out of the back of the hand). The wrist HUD rides on it.
     XrAction wristAction = XR_NULL_HANDLE;
     XrSpace wristSpace = XR_NULL_HANDLE;
+    XrAction rightGripAction = XR_NULL_HANDLE;
+    XrSpace rightGripSpace = XR_NULL_HANDLE;
     XrSwapchain wristSwapchain = XR_NULL_HANDLE;
     std::vector<XrSwapchainImageD3D11KHR> wristImages;
     // Panels in the room (XRPanelLayer): 0 the menu screen, 1 the power wheel.
@@ -1042,6 +1044,7 @@ bool XRSession::InitInput()
     if (!mkAction("aim_l", "Left hand pose", XR_ACTION_TYPE_POSE_INPUT, g.aimAction[0])) return false;
     if (!mkAction("aim_r", "Right hand pose", XR_ACTION_TYPE_POSE_INPUT, g.aimAction[1])) return false;
     // Optional: without it the wrist HUD falls back to the aim pose.
+    mkAction("wrist_r", "Right hand grip pose", XR_ACTION_TYPE_POSE_INPUT, g.rightGripAction);
     if (!mkAction("wrist_l", "Left wrist pose (HUD)", XR_ACTION_TYPE_POSE_INPUT, g.wristAction)) g.wristAction = XR_NULL_HANDLE;
     // Haptics are a nicety: without them every input still works, so a runtime that refuses them is not fatal.
     m_HapticReady = mkAction("haptic_l", "Left vibration", XR_ACTION_TYPE_VIBRATION_OUTPUT, g.hapticAction[0])
@@ -1084,6 +1087,7 @@ bool XRSession::InitInput()
         { &g.btnAction[6], "/user/hand/left/input/menu/click" },
         { &g.aimAction[0], "/user/hand/left/input/aim/pose" }, { &g.aimAction[1], "/user/hand/right/input/aim/pose" },
         { &g.wristAction, "/user/hand/left/input/grip/pose" },
+        { &g.rightGripAction, "/user/hand/right/input/grip/pose" },
         { &g.hapticAction[0], "/user/hand/left/output/haptic" }, { &g.hapticAction[1], "/user/hand/right/output/haptic" } });
     suggest("/interaction_profiles/valve/index_controller", {
         { &g.turnAction, "/user/hand/right/input/thumbstick/x" }, { &g.turnYAction, "/user/hand/right/input/thumbstick/y" },
@@ -1096,6 +1100,7 @@ bool XRSession::InitInput()
         { &g.btnAction[6], "/user/hand/left/input/trackpad/force" },
         { &g.aimAction[0], "/user/hand/left/input/aim/pose" }, { &g.aimAction[1], "/user/hand/right/input/aim/pose" },
         { &g.wristAction, "/user/hand/left/input/grip/pose" },
+        { &g.rightGripAction, "/user/hand/right/input/grip/pose" },
         { &g.hapticAction[0], "/user/hand/left/output/haptic" }, { &g.hapticAction[1], "/user/hand/right/output/haptic" } });
 
     XrSessionActionSetsAttachInfo attach = { XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
@@ -1110,6 +1115,10 @@ bool XRSession::InitInput()
         asci2.action = g.aimAction[i];
         asci2.poseInActionSpace.orientation.w = 1.0f;
         xrCreateActionSpace(g.session, &asci2, &g.aimSpace[i]);
+    }
+    if (g.rightGripAction) {
+        XrActionSpaceCreateInfo sci={XR_TYPE_ACTION_SPACE_CREATE_INFO};sci.action=g.rightGripAction;sci.poseInActionSpace.orientation.w=1;
+        xrCreateActionSpace(g.session,&sci,&g.rightGripSpace);
     }
     if (g.wristAction)
     {
@@ -1235,6 +1244,15 @@ void XRSession::SyncInput()
             m_WristPose[s][4] = w.position.x; m_WristPose[s][5] = w.position.y; m_WristPose[s][6] = w.position.z;
         }
     }
+    for(int i=0;i<2;++i) {
+        auto& h=m_Input.gripHand[i];h={};
+        XrSpaceLocation loc={XR_TYPE_SPACE_LOCATION};const auto space=i?g.rightGripSpace:g.wristSpace;
+        constexpr auto both=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+        if(space && XR_SUCCEEDED(xrLocateSpace(space,g.space,g.frameState.predictedDisplayTime,&loc)) && (loc.locationFlags&both)==both) {
+            h.posX=loc.pose.position.x;h.posY=loc.pose.position.y;h.posZ=loc.pose.position.z;h.valid=true;
+        }
+    }
+
 }
 
 void XRSession::LocateHead(long long time, const XREyePose eyes[2], XREyePose& head)
@@ -1274,7 +1292,7 @@ float XRSession::EyeCant(int i) const
     return 2.f * acosf(d > 1.f ? 1.f : d) * 57.29578f;
 }
 
-bool XRSession::LocateAt(long long time, XREyePose eyes[2], XRHandPose hands[2], XREyePose* head)
+bool XRSession::LocateAt(long long time, XREyePose eyes[2], XRHandPose hands[2], XREyePose* head, XRHandPose* grips)
 {
     if (!m_Initialized || !m_SessionRunning || !g.session || !g.space || m_ViewCount != 2 || time <= 0) return false;
     {   // a recenter that takes effect by then: the poses would be in the new space with the old generation
@@ -1318,6 +1336,13 @@ bool XRSession::LocateAt(long long time, XREyePose eyes[2], XRHandPose hands[2],
         h.posX = loc.pose.position.x; h.posY = loc.pose.position.y; h.posZ = loc.pose.position.z;
         h.quatX = loc.pose.orientation.x; h.quatY = loc.pose.orientation.y; h.quatZ = loc.pose.orientation.z; h.quatW = loc.pose.orientation.w;
         h.valid = true; h.held = false;
+    }
+    if(grips) for(int i=0;i<2;++i) {
+        grips[i]={};XrSpaceLocation loc={XR_TYPE_SPACE_LOCATION};const auto space=i?g.rightGripSpace:g.wristSpace;
+        constexpr auto both=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+        if(space && XR_SUCCEEDED(xrLocateSpace(space,g.space,(XrTime)time,&loc)) && (loc.locationFlags&both)==both) {
+            grips[i].posX=loc.pose.position.x;grips[i].posY=loc.pose.position.y;grips[i].posZ=loc.pose.position.z;grips[i].valid=true;
+        }
     }
     m_LocatesAhead++;
     return true;
@@ -2773,6 +2798,8 @@ bool XRSession::Shutdown(bool processExit)
     }
     DestroySwapchain(g.wristSwapchain); g.wristImages.clear();
     if (g.wristSpace) { xrDestroySpace(g.wristSpace); g.wristSpace = XR_NULL_HANDLE; }
+    if(g.rightGripSpace){xrDestroySpace(g.rightGripSpace);g.rightGripSpace=XR_NULL_HANDLE;}
+    g.rightGripAction=XR_NULL_HANDLE;
     g.wristAction = XR_NULL_HANDLE; m_WristValid[0] = m_WristValid[1] = false;
     for (int i = 0; i < 2; i++)
         if (g.aimSpace[i]) { xrDestroySpace(g.aimSpace[i]); g.aimSpace[i] = XR_NULL_HANDLE; }

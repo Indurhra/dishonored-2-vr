@@ -927,7 +927,7 @@ namespace
     // controller was further than the game arm reaches, the IK dragged the SHOULDER towards the hand -- 7-10 cm forward
     // and up, in front of the face (measured, arm forward and arm up). Now the segments are lengthened towards g_ArmLen
     // first (a scale along each bone, at most g_ArmScaleMax), and only beyond that does the shoulder follow.
-    std::atomic<float> g_ArmLen{ 0.56f }, g_ArmScaleMax{ 1.15f };
+    std::atomic<float> g_ArmLen{ 0.50f }, g_ArmScaleMax{ 1.15f };
     std::atomic<float> g_HandScale{ 1.f }, g_EquippedHandScale{ 1.f };
     std::atomic<float> g_Pole[3] = { -0.2f, 0.4f, -0.8f };             // fwd, outward, up: which way the elbow points
     std::atomic<float> g_ForearmPrior{ 0.26f }, g_UpperPrior{ 0.30f };  // wrist->elbow, elbow->shoulder (m), until measured
@@ -1073,12 +1073,21 @@ namespace
         const bool fromView = g_HandsFromView.load() && ViewMatrixHook::ViewPoses(serial, vset) && vset.inputValid;
         if (fromView) { hp = eye >= 0 ? vset.eye[eye] : vset.head; g_XfFromView++; } else g_XfLatest++;
         const bool prevSameEye = eye >= 0 && g_PrevPerEye.load() && StereoTaa::PrevIsSameEye(vm);
+        XRInputState palmInput;
+        if(fromView) palmInput=vset.input; else VRRuntime::GetInput(palmInput);
+        for(int h=0;h<2;++h) if(palmInput.gripHand[h].valid && !palmInput.gripHand[h].held) {
+            palmInput.hand[h].posX=palmInput.gripHand[h].posX;
+            palmInput.hand[h].posY=palmInput.gripHand[h].posY;
+            palmInput.hand[h].posZ=palmInput.gripHand[h].posZ;
+        }
+        HandQ palmSocket[2];
+        { std::lock_guard lock(g_ArmBonesM);palmSocket[0]=g_HandQ[0];palmSocket[1]=g_HandQ[1]; }
         Rigid hw[2];                                // controller poses in world space; columns = fwd/left/up
         bool haveHand[2] = {};
         for (int h = 0; h < 2; h++)
         {
             float horg[3], hxaxis[9];
-            if (!hp.valid || !HandAimHook::ControllerPoseAt(h, vorg, haxis, hp.pos, horg, hxaxis, fromView ? &vset.input : nullptr,
+            if (!hp.valid || !HandAimHook::ControllerPoseAt(h, vorg, haxis, hp.pos, horg, hxaxis, &palmInput,
                                                             fromView ? vset.head.quat : nullptr)) continue;
             haveHand[h] = true;
             for (int i = 0; i < 3; i++)
@@ -1196,6 +1205,12 @@ namespace
                 // equipment gets the same rigid delta, so the body of the weapon and the mods that hang off it at
                 // their own offsets stay together -- what came apart in the previous design.
                 Rigid target = Mul(Mul(hw[h], g_GripBase[h]), grip);
+                // Q maps the animated palm to the equipment. Preserve the weapon's
+                // aiming orientation, but seat its animated palm at the tracked grip.
+                if(palmSocket[h].valid && g_EntStable[h]>=kSettleFrames && g_WeaponHits[h].load()>=3) {
+                    const Rigid palm=Mul(target,Inv(palmSocket[h].q));
+                    for(int i=0;i<3;++i) target.t[i]+=hw[h].t[i]-palm.t[i];
+                }
                 if (g_XfControl < 1.f) { const float zero[3]={}; target=BlendRigid(ent,target,g_XfControl,zero); }
                 deltaWorld[h] = Mul(target, Inv(ent));
                 g_TargetPose[h] = target; g_TargetValid[h] = true; g_HandPose[h] = hw[h];
@@ -2579,9 +2594,9 @@ namespace
         F.handScale = ai.palmTgtValid ? 1.f+((ai.gripApplied ? g_EquippedHandScale.load() : g_HandScale.load())-1.f)*control : 1.f;
         Xform(Inv(m2r), palmT.t, F.palmPivot);
         for (int i = 0; i < 3; ++i) Wp[i] = F.palmPivot[i] + F.handScale * (Wp[i] - F.palmPivot[i]);
-        // the drawn arm towards the real arm's length (g_ArmLen), never shorter than the game's own
+        // Fit both shorter and longer arms while preserving the controller-anchored hand.
         float ks = 1.f;
-        { const float want = g_ArmLen.load(); if (want > 0.f) ks = std::clamp(want / (L1 + L2), 1.f, std::max(1.f, g_ArmScaleMax.load())); }
+        { const float want = g_ArmLen.load(); if (want > 0.f) ks = ArmCalibration::ArmScale(want, L1 + L2, g_ArmScaleMax.load()); }
         ks=1.f+(ks-1.f)*control;
         const float L1k = L1 * ks, L2k = L2 * ks;
         // the shoulder under the head, and the elbow hint, in model space
@@ -4432,14 +4447,24 @@ bool GpuTrace::Install(IDXGISwapChain* sc)
 //! Checked every Present (a few compares): a set of functions not hooked yet gets its own hooks (Hooks<0, 1>).
 void GpuTrace::RehookImmediate()
 {
-    if (!g_Installed || !g_Immediate || g_ImmMTHooked) return;
+    if (!g_Installed || !g_Immediate) return;
     void** vt = *(void***)g_Immediate;
     if (!vt) return;
     bool fresh = false;
     for (int s : kHookedImmSlots)
         if (std::find(g_HookedFns.begin(), g_HookedFns.end(), vt[s]) == g_HookedFns.end()) { fresh = true; break; }
     if (!fresh) return;
-    g_ImmMTHooked = true;      // one attempt: a third implementation is logged by the next check's absence of effect
+    if (g_ImmMTHooked) {
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            for (int slot : kHookedImmSlots)
+                if (std::find(g_HookedFns.begin(), g_HookedFns.end(), vt[slot]) == g_HookedFns.end())
+                    LOGI("GpuTrace: untracked later context implementation slot {} function {} [{}]", slot, vt[slot], ModuleOf(vt[slot]));
+        }
+        return;
+    }
+    g_ImmMTHooked = true;
     std::vector<void*> taken = g_HookedFns;
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
@@ -5127,7 +5152,7 @@ int  GpuTrace::ArmMode() { return g_ArmMode; }
 void GpuTrace::SetBodyFollow(int on) { g_BodyFollow = on; }
 void GpuTrace::SetEquippedHandScale(float scale) { g_EquippedHandScale=ArmCalibration::HandScale(scale); LOGI("gpubody: equipped hand scale {} about learned palm (equipment size retained)",g_EquippedHandScale.load()); }
 void GpuTrace::SetHandScale(float scale) { g_HandScale = ArmCalibration::HandScale(scale); LOGI("gpubody: empty/casting hand scale {} (equipped fit is separate)", g_HandScale.load()); }
-void GpuTrace::SetArmLength(float metres, float maxScale) { g_ArmLen = metres; if (maxScale > 0.f) g_ArmScaleMax = maxScale; LOGI("gpubody: drawn arm lengthened towards {:.2f} m (at most x{:.2f})", g_ArmLen.load(), g_ArmScaleMax.load()); }
+void GpuTrace::SetArmLength(float metres, float maxScale) { g_ArmLen = metres; if (maxScale > 0.f) g_ArmScaleMax = maxScale; LOGI("gpubody: drawn arm fitted towards {:.2f} m (at most x{:.2f})", g_ArmLen.load(), g_ArmScaleMax.load()); }
 void GpuTrace::SetShoulder(float fwd, float out, float up) { g_ShoulderOff[0] = fwd; g_ShoulderOff[1] = out; g_ShoulderOff[2] = up; }
 void GpuTrace::SetPole(float fwd, float out, float up) { g_Pole[0] = fwd; g_Pole[1] = out; g_Pole[2] = up; }
 void GpuTrace::SetArmPriors(float forearm, float upper)

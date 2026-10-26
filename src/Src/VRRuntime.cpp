@@ -635,7 +635,7 @@ VRRuntime::PoseSet VRRuntime::LocateForView(int kind)
     if (ps.valid && PredictTime(kind, ps.base, t))
     {
         XREyePose e[2], hd; XRHandPose h[2];
-        if (g_Session.LocateAt(t, e, h, &hd))
+        if (g_Session.LocateAt(t, e, h, &hd, ps.input.gripHand))
         {
             HeadFromEyes(e, hd, ps.head.gen, ps.eye, ps.head);
             ps.input.hand[0] = h[0]; ps.input.hand[1] = h[1]; ps.input.time = t;

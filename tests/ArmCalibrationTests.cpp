@@ -31,6 +31,11 @@ int main()
             require(std::abs(actualTip[i]-(pivot[i]+scale*(before[i]-pivot[i])))<1e-6f,"geometry scales about palm");
         }
     }
+    require(std::abs(ArmCalibration::ArmScale(.50f,.60f,1.15f)-5.f/6.f)<1e-6f,"long arms can shorten");
+    require(ArmCalibration::ArmScale(.70f,.50f,1.15f)==1.15f,"extension is bounded");
+    require(ArmCalibration::ArmScale(.10f,.50f,1.15f)==.65f,"shortening is bounded");
+    require(ArmCalibration::ArmScale(.50f,0.f,1.15f)==1.f,"unlearned length retains native geometry");
+    require(ArmCalibration::ArmScale(.50f,std::numeric_limits<float>::quiet_NaN(),1.15f)==1.f,"invalid measurement retains native geometry");
     require(ArmCalibration::HandScale(-1.f)==0.65f,"lower safety bound");
     require(ArmCalibration::HandScale(2.f)==1.15f,"upper safety bound");
     require(ArmCalibration::HandScale(std::numeric_limits<float>::quiet_NaN())==1.f,"invalid input restores native size");

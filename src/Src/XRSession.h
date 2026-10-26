@@ -97,6 +97,7 @@ struct XRInputState
     float triggerL = 0.0f, triggerR = 0.0f; //!< 0..1
     float gripL = 0.0f, gripR = 0.0f;       //!< squeeze, 0..1
     unsigned buttons = 0;        //!< kXRBtn* mask (a/b/x/y, stick clicks)
+    XRHandPose gripHand[2]; // anatomical controller grip positions, at the same prediction time
     XRHandPose leftGrip;         //!< raw left grip pose for the opening-hand wheel
     XRHandPose hand[2];          //!< 0 = left, 1 = right (aim pose)
     //! XrTime (ns) the poses were predicted for. Velocities come from differences of this, not of the wall clock:
@@ -285,7 +286,7 @@ public:
     //! head is not tracked, or a recenter takes effect before `time` (its generation is bumped by BeginFrame only).
     //! Render thread: OpenXR allows xrLocateViews / xrLocateSpace while the frame thread is inside xrWaitFrame.
     //! `head` (optional): the head at that time (see Head()).
-    bool LocateAt(long long time, XREyePose eyes[2], XRHandPose hands[2], XREyePose* head = nullptr);
+    bool LocateAt(long long time, XREyePose eyes[2], XRHandPose hands[2], XREyePose* head = nullptr, XRHandPose* grips = nullptr);
     //! The begun frame's predicted display time and period (XrTime, ns); 0 before the first frame.
     long long FrameDisplayTime() const;
     long long FramePeriod() const;
