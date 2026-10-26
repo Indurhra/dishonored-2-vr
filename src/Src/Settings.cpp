@@ -31,6 +31,7 @@ namespace
         { "gameplay.throwgestures",     Kind::Bool,   "1", 0, 0, nullptr },
         { "gameplay.grabobjects",       Kind::Bool,   "1", 0, 0, nullptr },
         { "gameplay.livewheel",         Kind::Bool,   "0", 0, 0, nullptr },
+        { "gameplay.psvr2triggers",     Kind::Bool,   "1", 0, 0, nullptr }, // startup-only Toolkit option
         { "display.reticle",            Kind::Bool,   "1", 0, 0, nullptr },
         { "display.reticlestyle",       Kind::Choice, "leftdot", 0, 0, "leftdot|rays" },
         { "display.wristhud",           Kind::Bool,   "1", 0, 0, nullptr },

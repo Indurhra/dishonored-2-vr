@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Psvr2Triggers.h"
 #include "VRRuntime.h"
 #include "XRSession.h"
 #include "XRCapture.h"
@@ -715,6 +716,7 @@ unsigned long long VRRuntime::HapticPulses() { return g_Session.HapticPulses(); 
 
 void VRRuntime::Shutdown(bool processExit)
 {
+    Psvr2Triggers::Stop();
     if (g_Session.IsInitialized()) g_Session.Shutdown(processExit);
 }
 void VRRuntime::SetKeepAlive(int m) { g_Session.SetKeepAlive(m); LOGI("cmd vr keepalive {} ({})", m, m ? "the headset gets the last picture while the game sends none" : "off: the headset waits (the hourglass)"); }

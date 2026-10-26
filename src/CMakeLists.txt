@@ -113,7 +113,7 @@ set(MOD_SOURCES
     Src/VRMath.h
     Src/pch.h
 )
-add_library(DishonoredVR SHARED ${MOD_SOURCES})
+add_library(DishonoredVR SHARED ${MOD_SOURCES} Src/Psvr2Triggers.cpp)
 target_precompile_headers(DishonoredVR PRIVATE Src/pch.h)
 target_link_libraries(DishonoredVR PRIVATE
     fmt::fmt imgui::imgui OpenXR::openxr_loader
@@ -130,3 +130,6 @@ if(DVR_BUILD_WHEEL_PREVIEW)
     target_link_libraries(wheel_preview PRIVATE imgui::imgui d3d11 dxgi windowscodecs ole32)
     set_target_properties(wheel_preview PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OUT_DIR}")
 endif()
+
+add_executable(dvr_psvr2_bridge Psvr2/Bridge.cpp)
+set_target_properties(dvr_psvr2_bridge PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OUT_DIR}")

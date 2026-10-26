@@ -19,6 +19,7 @@
 #include "Overlay.h"
 #include "StereoSync.h"
 #include "LiveWheel.h"
+#include "Psvr2Triggers.h"
 #include "CameraHook.h"
 #include <cmath>
 #include <algorithm>
@@ -749,6 +750,7 @@ namespace
 
 void KbmInject::Tick()
 {
+    Psvr2Triggers::Frame triggerFrame; // Every early return publishes Off.
     g_Frame++;
     {
         static LARGE_INTEGER fq{}, last{}; LARGE_INTEGER now; QueryPerformanceCounter(&now);
@@ -1267,6 +1269,9 @@ void KbmInject::Tick()
         }
         else if (g_Now - g_PendingStrike > 0.4) { LOGI("KbmInject: gesture strike dropped: block is still held"); g_PendingStrike = -1; }
     }
+    triggerFrame.desired=dvrpsvr2::Choose(Psvr2Triggers::Item(),g_Mode==kModePlay && !PlayerState::Cinematic(),
+        VRRuntime::GetStatus().state==5,in.hand[0].valid && !in.hand[0].held,
+        (holding && grabHand==0) || letsL || LiveWheel::Active() || g_Possessing || (g_Latched & kVTrigL),in.triggerL);
     // L trigger: power / weapon (left hand) -- not while the left hand holds an object.
     Hold(kRMB, (live & kVTrigL) != 0 && !(holding && grabHand == 0) && !letsL);
     ThrowGesture::Tick(in, (live & kVTrigL) != 0);        // ...and a grenade leaves with the hand's velocity when it opens

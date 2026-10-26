@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Psvr2Triggers.h"
 #include "BodyHide.h"
 #include "GameInfo.h"
 #include "Game.h"
@@ -210,6 +211,7 @@ void BodyHide::Tick()
     // changes it before the models have necessarily been touched -- neither test alone catches both.
     static void* lastPlayer = nullptr;
     void* player = Game::LocalPlayer();
+    Psvr2Triggers::ObserveEquipment(player);
     if (player != lastPlayer) { if (lastPlayer) g_PlayerChanges++; changed = true; }
     lastPlayer = player;
     if (changed || (g_Frame++ % 30) == 0 || (active && !wasActive)) Resolve();
