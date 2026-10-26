@@ -64,11 +64,11 @@ namespace
     {
         for (int i = 0; i < 2; i++)
         {
-            eyes[i].valid = e[i].valid; eyes[i].gen = gen;
+            eyes[i].valid = e[i].valid; eyes[i].gen = gen; eyes[i].held = e[i].held;
             eyes[i].pos[0] = e[i].posX; eyes[i].pos[1] = e[i].posY; eyes[i].pos[2] = e[i].posZ;
             eyes[i].quat[0] = e[i].quatX; eyes[i].quat[1] = e[i].quatY; eyes[i].quat[2] = e[i].quatZ; eyes[i].quat[3] = e[i].quatW;
         }
-        head.valid = e[0].valid; head.gen = gen;
+        head.valid = e[0].valid; head.gen = gen; head.held = h.held;
         for (int k = 0; k < 3; k++) head.pos[k] = (eyes[0].pos[k] + eyes[1].pos[k]) * 0.5f;
         // the head's own orientation (XRSession::Head), not the left eye's: canted displays turn each eye ~10 deg out
         head.quat[0] = h.quatX; head.quat[1] = h.quatY; head.quat[2] = h.quatZ; head.quat[3] = h.quatW;
@@ -413,14 +413,14 @@ void VRRuntime::OnPresent(IDXGISwapChain* sc)
                 {
                     std::lock_guard lk(g_PoseMutex);
                     g_FrameD = g_Session.FrameDisplayTime(); g_FramePeriod = g_Session.FramePeriod();
-                    g_Head.valid = e0.valid; g_Head.gen = g_Session.RecenterGeneration();
+                    g_Head.held = e0.held; g_Head.valid = e0.valid; g_Head.gen = g_Session.RecenterGeneration();
                     g_Head.pos[0] = (e0.posX + e1.posX) * 0.5f; g_Head.pos[1] = (e0.posY + e1.posY) * 0.5f; g_Head.pos[2] = (e0.posZ + e1.posZ) * 0.5f;
                     const XREyePose& hd = g_Session.Head();   // the head's orientation, not the left eye's (canted displays)
                     g_Head.quat[0] = hd.quatX; g_Head.quat[1] = hd.quatY; g_Head.quat[2] = hd.quatZ; g_Head.quat[3] = hd.quatW;
                     const XREyePose* eyes[2] = { &e0, &e1 };
                     for (int i = 0; i < 2; i++)
                     {
-                        g_Eye[i].valid = eyes[i]->valid; g_Eye[i].gen = g_Head.gen;
+                        g_Eye[i].held = eyes[i]->held; g_Eye[i].valid = eyes[i]->valid; g_Eye[i].gen = g_Head.gen;
                         g_Eye[i].pos[0] = eyes[i]->posX; g_Eye[i].pos[1] = eyes[i]->posY; g_Eye[i].pos[2] = eyes[i]->posZ;
                         g_Eye[i].quat[0] = eyes[i]->quatX; g_Eye[i].quat[1] = eyes[i]->quatY; g_Eye[i].quat[2] = eyes[i]->quatZ; g_Eye[i].quat[3] = eyes[i]->quatW;
                     }

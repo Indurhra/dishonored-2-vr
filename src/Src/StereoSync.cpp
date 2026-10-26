@@ -5,6 +5,7 @@
 #include "CVars.h"
 #include "KbmInject.h"
 #include "ScreenMode.h"
+#include "LiveWheel.h"
 #include <detours/detours.h>
 #include <algorithm>
 
@@ -303,7 +304,7 @@ void StereoSync::OnPresent()
         if (paused) w = wPaused;
         else if (stop) w = wStopTime;
         else if (flat) w = wScreen;
-        else if (ks.mode != 0) w = wMenu;
+        else if (ks.mode != 0 && !(ks.mode == 2 && LiveWheel::Active())) w = wMenu;
         else if (!ks.simulating) w = wNotSim;
         else if (!player) w = wNoPlayer;
         else if (dt > kSpikeSec) { w = wSpike; if (g_CooldownUntil < np + 2) g_CooldownUntil = np + 2; }

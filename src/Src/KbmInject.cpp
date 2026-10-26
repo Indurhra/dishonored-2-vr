@@ -18,6 +18,7 @@
 #include "BinkVideo.h"
 #include "Overlay.h"
 #include "StereoSync.h"
+#include "LiveWheel.h"
 #include "CameraHook.h"
 #include <cmath>
 #include <algorithm>
@@ -964,11 +965,15 @@ void KbmInject::Tick()
     // play walked with the stick and menu swallowed the grip, so nothing could close the wheel any more.
     else if (fpDraws > 0 && PlayerState::Running("Powerwheel"))
         mode = kModeWheel;
+    // A paused camera freezes the old player-state observation clock. The native
+    // live-wheel exit is authoritative: a stale Powerwheel bit cannot own pause UI.
+    if(LiveWheel::Enabled() && LiveWheel::Closed()) mode=menuNow ? kModeMenu : kModePlay;
     if (mode != g_Mode)
     {
         const bool viaMenu = mode == kModeMenu || g_Mode == kModeMenu;
         if (viaMenu)
         {   // hands off everything, and ignore whatever is held until it is released
+            LiveWheel::Cancel();
             for (int i = 0; i < kCount; i++) if (g_Held[i]) { g_TapUntil[i] = 0; g_Held[i] = false; SendKey((Slot)i, false); }
             g_Latched = btn; g_SprintLatch = false; g_MenuDir = -1; g_MenuBtnDown = -1; g_PendingStrike = -1;
             QuickReset();      // a Y / X held into a menu is latched: its "release" must not go out as a short press
@@ -980,7 +985,11 @@ void KbmInject::Tick()
         // stick and letting go of the grip with the stick still pushed -- and that stick then walked: measured, the
         // movement keys went down on the very tick the wheel's MOUSE3 came up, and with a key held the game left the
         // wheel OPEN (sim flapping for good, the mod flipping menu <-> play every 0.1 s and re-pressing the keys).
-        if (g_Mode == kModeWheel) g_StickLatch = true;
+        if (g_Mode == kModeWheel)
+        {
+            g_StickLatch = true; g_Latched |= btn;
+            QuickReset(); g_MenuBtnDown = -1; g_PauseSent = false;
+        }
         LOGI("KbmInject: input mode {} -> {} (sim {} fpdraws {} states {} [{}] play latch {}{} latched 0x{:X})", ModeName(g_Mode), ModeName(mode),
              g_Simulating, fpDraws, PlayerState::RunningCount(), PlayerState::RunningNames(), g_PlayLatched ? 1 : 0, uiState ? " ui" : "", viaMenu ? btn : 0u);
         g_Mode = mode;
@@ -1068,6 +1077,25 @@ void KbmInject::Tick()
         // Nothing else goes out, and the servo stays quiet (the game is not turning while the wheel is up).
         for (int i = 0; i < kCount; i++) if (i != kMMB && g_Held[i] && g_TapUntil[i] == 0) Hold((Slot)i, false);
         const bool gripL = (live & kVGripL) != 0;
+        if (LiveWheel::Active())
+        {
+            MenuButton(live,g_QuickSlots.load()!=0);
+            const float lm=in.moveX*in.moveX+in.moveY*in.moveY, rm=in.turnX*in.turnX+in.turnY*in.turnY;
+            const float sx=rm>=lm ? in.turnX : in.moveX, sy=rm>=lm ? in.turnY : in.moveY;
+            const bool tracked=in.hand[0].valid && !in.hand[0].held && !VRRuntime::GetEyePose(0).held;
+            const bool close=LiveWheel::Input(sx,sy,gripL,(pressed & kXRBtnB)!=0,tracked,(pressed & kXRBtnY) ? 1 : (pressed & kXRBtnX) ? -1 : 0);
+            if (close) g_Latched |= kVGripL;
+            Hold(kMMB,gripL && !close);
+            if(!close)
+            {
+                if(pressed & kXRBtnA) { Tap(kT);g_Count.potions[1]++; }
+                if(pressed & kXRBtnThumbL) { Tap(kR);g_Count.potions[0]++; }
+            }
+            g_MoveKeys[0]=g_MoveKeys[1]=g_MoveKeys[2]=g_MoveKeys[3]=false;
+            g_YawAccum=0;g_PitchAccum=0;
+            std::lock_guard lk(g_M);unsigned m=0;for(int i=0;i<kCount;i++) if(g_Held[i]) m|=1u<<i;g_Stats.heldMask=m;
+            return;
+        }
         if (!gripL && g_Held[kMMB] && g_TapUntil[kMMB] == 0 && g_WheelAssigned)
         {   // the wheel will not close on this release (see g_WheelAssigned): click MOUSE3 once more, a moment later
             g_WheelCloseAt = g_Now + 0.1; g_WheelAssigned = false;
@@ -1209,7 +1237,9 @@ void KbmInject::Tick()
     g_WasHolding = holding;
     const bool afterHold = g_HoldEndedAt >= 0 && g_Now - g_HoldEndedAt < 0.8;
     const bool letsL = grabHand == 0 && g_TrigLets, letsR = grabHand == 1 && g_TrigLets;
-    Hold(kMMB,   (live & kVGripL) != 0 && !takesL && !holding);   // L grip : power wheel (or take, above)
+    const bool wantsWheel=(live & kVGripL)!=0 && !takesL && !holding;
+    if(wantsWheel && !g_Held[kMMB]) LiveWheel::RequestOpen();
+    Hold(kMMB, wantsWheel);   // L grip : power wheel (or take, above)
     // The sword by gesture (SwordGesture): a swing taps the attack, the fist by the right ear holds it (the power
     // attack's charge) until a thrust lets go, the fist at the left shoulder blocks. The trigger and the grip keep
     // doing all of it as well.
@@ -1254,7 +1284,7 @@ void KbmInject::Tick()
 }
 
 bool KbmInject::Possessing() { return g_Possessing.load(); }
-void KbmInject::ReleaseAll() { for (int i = 0; i < kCount; i++) if (g_Held[i]) { g_TapUntil[i] = 0; g_Held[i] = false; SendKey((Slot)i, false); } g_SprintLatch = false; }
+void KbmInject::ReleaseAll() { LiveWheel::Cancel(); for (int i = 0; i < kCount; i++) if (g_Held[i]) { g_TapUntil[i] = 0; g_Held[i] = false; SendKey((Slot)i, false); } g_SprintLatch = false; }
 void KbmInject::SetEnabled(bool on) { g_Enabled = on; if (!on) ReleaseAll(); }
 bool KbmInject::Enabled() { return g_Enabled; }
 void KbmInject::SetSnapAngle(float d) { g_SnapDeg = d; }

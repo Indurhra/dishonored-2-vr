@@ -11,6 +11,7 @@
 #include "WristHud.h"
 #include "StereoTaa.h"
 #include "StereoSync.h"
+#include "LiveWheel.h"
 #include "BodyView.h"
 #include "VRRuntime.h"
 #include "Commands.h"
@@ -139,6 +140,7 @@ static DWORD WINAPI InitThread(LPVOID)
     PlayerViewHook::Install();
     PlayerViewHook::SetEnabled(false);   // the local player never goes through that builder
     ViewMatrixHook::Install();
+    LiveWheel::Install();
     StereoSync::Install();           // the game's frame: held on every second frame for synchronised stereo
     XInputHook::Install();
     XInputHook::SetEnabled(false);       // pad emulation reaches the engine's event queue but not the player yet (see ENGINE.md)

@@ -69,6 +69,7 @@ set(MOD_SOURCES
     Src/WristHud.cpp   Src/WristHud.h
     Src/StereoTaa.cpp  Src/StereoTaa.h
     Src/StereoSync.cpp Src/StereoSync.h
+    Src/LiveWheel.cpp Src/LiveWheel.h Src/WheelSelection.h
     Src/MetaAsw.cpp Src/MetaAsw.h
     Src/ScreenMode.cpp Src/ScreenMode.h
     Src/BinkVideo.cpp  Src/BinkVideo.h

@@ -33,7 +33,7 @@ namespace VRRuntime
     //! Latest located head pose (XR LOCAL space; midpoint of the eyes, eye-0 orientation).
     //! `gen` is the recentre generation the pose belongs to (XRSession::RecenterGeneration): when it changes, the pose
     //! jumped because the space moved, not because the head did.
-    struct HeadPose { float pos[3] = {}; float quat[4] = { 0, 0, 0, 1 }; bool valid = false; unsigned gen = 0; };
+    struct HeadPose { float pos[3] = {}; float quat[4] = { 0, 0, 0, 1 }; bool valid = false; unsigned gen = 0; bool held = false; };
     HeadPose GetHeadPose();
 
     //! Latest controller input snapshot (synced each frame). Returns false when

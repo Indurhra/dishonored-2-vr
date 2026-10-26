@@ -6,6 +6,7 @@
 #include "VRRuntime.h"
 #include "Settings.h"
 #include "Game.h"
+#include "LiveWheel.h"
 #include <d3d11.h>
 #include <algorithm>
 #include <cmath>
@@ -338,6 +339,14 @@ bool ScreenMode::OnXrFrame(XRSession& xr, ID3D11Texture2D* bb, bool imageFlat, b
         Centre(g_WheelAt, l.pos);
         l.outW = (unsigned)std::clamp(std::min((float)wtw, g_C.wheelSize * g_C.density), 256.f, 4096.f);
         l.outH = (unsigned)std::clamp(l.outW / aspect, 144.f, 4096.f);
+        if (auto* nativeInventory = LiveWheel::Texture())
+        {
+            l.srv = nativeInventory; l.srcW = l.srcH = 1024;
+            l.crop[0] = l.crop[1] = 0; l.crop[2] = l.crop[3] = 1024;
+            l.gamma = false; l.soft = 0; l.width = l.height = .75f;
+            l.outW = l.outH = 1024;
+            LiveWheel::PanelPose(l.pos, l.quat);
+        }
         xr.SetPanelLayer(1, l);
         g_S.wheelPanels++;
     }

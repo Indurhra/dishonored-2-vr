@@ -35,6 +35,7 @@
 #include "RenderRes.h"
 #include "StereoTaa.h"
 #include "StereoSync.h"
+#include "LiveWheel.h"
 #include "MetaAsw.h"
 #include "ScreenMode.h"
 #include <fstream>
@@ -593,7 +594,7 @@ namespace
             // Research: the FP weapon/arm models are skinned, so what places them on screen is the joint matrix
             // buffer, not the transform set (writing/freezing that was measured to change nothing). Find the buffer:
             // walk every pointer inside arkSkinnedRenderModel and report those holding float triplets that sit near
-            // the model's own origin — a joint palette in world space looks exactly like that.
+            // the model's own origin â€” a joint palette in world space looks exactly like that.
             //   modeljoints <hex model addr> [radius m]
             std::string what; ss >> what; float radius = 1.5f; ss >> radius;
             uint8_t* m = (uint8_t*)strtoull(what.c_str(), nullptr, 16);
@@ -956,6 +957,7 @@ namespace
             if (RenderRes::Command(what, ss)) return;
             if (StereoTaa::Command(what, ss)) return;
             if (StereoSync::Command(what, ss)) return;
+            if (LiveWheel::Command(what, ss)) return;
             if (ScreenMode::Command(what, ss)) return;
             if (KbmInject::Command(what, ss)) return;
             {   // cutscenes
@@ -1150,6 +1152,7 @@ namespace
         f << RenderRes::Status() << "\n";
         f << StereoTaa::Status() << "\n";
         f << StereoSync::Status() << "\n";
+        f << LiveWheel::Status() << "\n";
         f << MetaAsw::Status() << "\n";
         f << VRRuntime::SyncStatus() << "\n";
         f << VRRuntime::PredictStatus() << "\n";

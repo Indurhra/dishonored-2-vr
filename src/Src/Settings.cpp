@@ -30,6 +30,7 @@ namespace
         { "gameplay.swordgestures",     Kind::Bool,   "1", 0, 0, nullptr },
         { "gameplay.throwgestures",     Kind::Bool,   "1", 0, 0, nullptr },
         { "gameplay.grabobjects",       Kind::Bool,   "1", 0, 0, nullptr },
+        { "gameplay.livewheel",         Kind::Bool,   "0", 0, 0, nullptr },
         { "display.reticle",            Kind::Bool,   "1", 0, 0, nullptr },
         { "display.reticlestyle",       Kind::Choice, "leftdot", 0, 0, "leftdot|rays" },
         { "display.wristhud",           Kind::Bool,   "1", 0, 0, nullptr },
@@ -182,6 +183,7 @@ std::vector<std::string> Settings::PackageCommands()
     c.push_back(B("gameplay.swordgestures") ? "vr swing 7" : "vr swing 0");
     c.push_back(B("gameplay.throwgestures") ? "vr throw 1" : "vr throw 0");
     c.push_back(B("gameplay.grabobjects") ? "vr grab 1" : "vr grab 0");
+    c.push_back(B("gameplay.livewheel") ? "vr livewheel 1" : "vr livewheel 0");
     c.push_back(!B("display.reticle") ? "vr reticle 0" : V("display.reticlestyle") == "leftdot" ? "vr reticle 4" : "vr reticle 1");
     c.push_back(B("display.wristhud") ? "vr wristhud 1" : "vr wristhud 0");
     c.push_back(fmt::format("vr wristcfg size {}", F("display.wristhudsize") / 100.f));   // cm in the file, m in the command

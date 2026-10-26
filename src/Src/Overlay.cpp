@@ -5,6 +5,7 @@
 #include "XRProbe.h"
 #include "VRRuntime.h"
 #include "Reticle.h"
+#include "LiveWheel.h"
 #include "RenderRes.h"
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -183,8 +184,10 @@ void Overlay::OnPresent(IDXGISwapChain* sc)
     // before VRRuntime::OnPresent, so the backbuffer the mod submits already has it.
     Reticle::OnPresent();
     const bool reticle = Reticle::Mode() != 0 || Reticle::Axes() != 0;
-    if (!g_Visible && !reticle) return;
+    const bool wheel = LiveWheel::Active();
+    if (!g_Visible && !reticle && !wheel) return;
     if (!EnsureRTV(sc)) return;
+    if (wheel) LiveWheel::Render(g_Device, g_Ctx);
     ImGui_ImplDX11_NewFrame(); ImGui_ImplWin32_NewFrame();
     {   // the backbuffer can be larger than the window (RenderRes): draw in its pixels, the mouse mapped into them
         ImGuiIO& io = ImGui::GetIO();
