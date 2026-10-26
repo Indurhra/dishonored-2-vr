@@ -24,6 +24,16 @@ controllers. Free, open source, unofficial.
 > Status: **0.5.0, beta** (it replaces 1.0.0, which was numbered too early). Developed and played on a Meta Quest 3 (Link / Air Link). Other headsets and runtimes are expected to
 > work but are less tested: see [docs/STATUS.md](docs/STATUS.md) for what is verified, and the known issues.
 
+## Controller controls
+
+See the **[controller guide](docs/CONTROLS.md)** for the full default layout, PSVR2 button equivalents, movement, interaction, quick slots, menus and adaptive triggers.
+
+- **Weapon / power wheel:** hold left grip, move your left hand toward the highlighted item, then release to equip. B cancels. All available inventory entries use one ring, with no selection resistance or paging.
+- **VR menu:** hold X for three seconds (**left Square on PSVR2**), navigate with either stick, confirm with A, and close with B.
+- **Interact:** right grip. **Fire / use power:** left trigger. **Sword:** right trigger or enabled swing gestures.
+
+These describe the current fork’s default layout; preserved settings and custom bindings may differ.
+
 ## Install
 
 1. Download `DishonoredVR-<version>.zip` from the [Releases](../../releases) page.
