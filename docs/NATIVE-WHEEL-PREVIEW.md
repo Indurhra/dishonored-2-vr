@@ -3,7 +3,7 @@
 This revision combines the game's original wheel textures with the existing VR
 hold/select/release interaction. It has eight items per page, a highlighted rim,
 selected-item illustration, native item name, ammo counts and page indicators.
-The centre and surroundings remain transparent; there is no full-screen veil.
+A 41% opacity dark backing fills the ring interior; the surroundings remain transparent and there is no full-screen veil.
 Left grip opens, the thumbstick selects, release confirms, B/centre cancels and
 X/Y changes pages. This revision does not add physical hand-hover selection.
 
@@ -54,3 +54,16 @@ revision only. The new package is staged in `local/native-wheel-review-20261026`
 for appearance review; it has not been installed or launched. The installed
 official DLL SHA256 remains
 `53CE4AF1105E601F78C9480035503EC1D0E4754C2F4F0A4639952B89D7848048`.
+
+## Approved backing and installation
+
+After visual approval, the user requested a dark backing confined to the ring
+and installation for their headset test. Added a radius-410 local disk with
+RGBA (12,14,18,105), behind all artwork. Rebuilt both targets and regenerated
+all seven previews; inspected the full pistol preview. Installed the rebuilt
+DLL, candidate INI (LiveWheel=1) and 75 original-art PNGs with the game closed.
+All installed files match the staged SHA256 hashes. The immediately preceding
+DLL/INI are backed up at local/wheel-install-backup-20261026-143352.
+Installed DLL SHA256:
+FB50D0219A524262BF65AE7E6D383AA956B86F8A5F44ADF282C704DF9CEFD0E9.
+In-game verification is now pending the user's headset test.

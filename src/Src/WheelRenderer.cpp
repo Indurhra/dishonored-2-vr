@@ -71,7 +71,8 @@ void WheelRenderer::Draw(const std::vector<WheelModel::Item>& items,int page,int
     page=std::clamp(page,0,pages-1);
     const int start=page*WheelModel::PerPage,n=std::min(WheelModel::PerPage,(int)items.size()-start);
     const auto ivory=IM_COL32(240,235,214,255),muted=IM_COL32(195,197,201,240);
-    // Original broken/etched ring textures, with a clear centre and no screen veil.
+    // Local translucent backing stops at the etched ring; no full-screen veil.
+    dl->AddCircleFilled(centre,410.f,IM_COL32(12,14,18,105),128);
     Image(1094,centre,ImVec2(842,842),IM_COL32(225,224,214,175));
     Image(1113,centre,ImVec2(824,824),IM_COL32(230,231,222,170));
     for(int slot=0;slot<n;++slot)
