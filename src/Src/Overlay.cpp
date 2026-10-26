@@ -181,6 +181,7 @@ void Overlay::OnPresent(IDXGISwapChain* sc)
     // The reticle rides on the same ImGui pass as the debug overlay, but it has to work with the overlay HIDDEN:
     // this is a gameplay aid, not a debug panel. Drawing here is what puts it in the headset -- OnPresent runs
     // before VRRuntime::OnPresent, so the backbuffer the mod submits already has it.
+    Reticle::OnPresent();
     const bool reticle = Reticle::Mode() != 0 || Reticle::Axes() != 0;
     if (!g_Visible && !reticle) return;
     if (!EnsureRTV(sc)) return;

@@ -1,5 +1,34 @@
 # Continuation assessment - 2026-10-26
 
+## Left-hand aiming dot
+
+User requested a smaller dot controlled by the left hand rather than the HMD.
+Reticle mode 4 draws one white filled dot with a narrow dark outline; no ring
+or beam. Display.ReticleStyle selects leftdot (default) or legacy rays;
+Display.Reticle still enables/disables it. Shipped candidate INI enables the
+dot. It projects the left-hand ray with each presented image's own camera,
+uses the existing engine gun/power/pointer landing point when available, and
+otherwise the existing fallback range (8m). It is not a guaranteed surface
+hit in that fallback case. It is drawn into the scene images, not HUD plane.
+Menus/wheel and game-owned scripted arms hide the dot. Invalid/held left-hand
+tracking also hides it (guard added after the first image captures; retest).
+Native ark_ui_crosshair_style is temporarily 0 during mode-4 VR gameplay;
+toggling off or entering a menu restores its previous numeric value if still
+ours, without changing its archived string. No native crosshair setting is
+permanently written. Other HUD elements retain their own routing.
+
+Release build passed. Simulator session local/sim-session-20261026-120436:
+3072x3264 recommendation, 3286x3555 stereo per eye, scale1, cap240. Steady
+8-second sample about194 Presents/s (5.15ms) /97 pairs/s (10.3ms/pair), zero
+stage failures, unpaired views, dropped pairs, TAA disagreement or fallback.
+Per-eye captures leftdot_neutral / leftdot_left25 / leftdot_right25 show
+left yaw25 moves the dot about624 pixels horizontally in each eye; rotating
+only the right hand25 restores the neutral dot to within0.4px horizontally.
+The neutral dot is about43 bright pixels per eye, with no large ring/beam.
+Native crosshair numeric value is0 with archived string2 while dot enabled;
+turning dot off restores numeric2. Visual native-HUD isolation and tracking-loss
+and pause/resume checks still need finishing. Headset size/comfort untested.
+
 ## Frame-cap and hand calibration checkpoint (supersedes earlier uncertainties)
 
 Commits use the user-authorized identity Indurhra <Shakozipred@googlemail.com>.

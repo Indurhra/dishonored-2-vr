@@ -14,7 +14,7 @@
 //! "where am I pointing" and the ring answers "where will it land" whenever the game knows.
 namespace Reticle
 {
-    //! 0 = off, 1 = both hands, 2 = the power hand only, 3 = the gun hand only.
+    //! 0 = off, 1 = both rays, 2 = power ray, 3 = gun ray, 4 = small left-hand aiming dot.
     void SetMode(int mode);
     void AddMark(const float* world);            //!< research: a world point drawn as a cross (`vr reticlemark x y z`)
     void ClearMarks();
@@ -26,6 +26,8 @@ namespace Reticle
     float Range();
     //! Draw into the current ImGui frame's foreground list. Called from Overlay::OnPresent, which owns the frame.
     void Draw();
+    //! Own the native crosshair only while the left-hand dot replaces it in VR gameplay.
+    void OnPresent();
     struct Stats { unsigned long long frames = 0, drawn = 0; int handValid = 0, projValid = 0, engineTarget = 0; };
     Stats GetStats();
 }

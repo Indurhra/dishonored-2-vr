@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Reticle.h"
+#include "CVars.h"
 #include "GpuTrace.h"
 #include "GunRay.h"
 #include "HandAimHook.h"
@@ -11,6 +12,7 @@
 #include <imgui.h>
 #include <cmath>
 #include <array>
+#include <algorithm>
 #include <vector>
 
 namespace
@@ -18,6 +20,8 @@ namespace
     std::atomic<int> g_Mode{ 0 };
     std::atomic<float> g_Range{ 8.f };
     std::atomic<int> g_Axes{ 0 };
+    bool g_CrosshairOwned = false;
+    int g_SavedCrosshair = 2;
     std::mutex g_M; Reticle::Stats g_Stats;
     // Research markers (`vr reticlemark x y z`): world points drawn as crosses, to check the projection against the image.
     std::vector<std::array<float, 3>> g_Marks;
@@ -43,6 +47,9 @@ namespace
     //! picked -- so what the ray touches on screen is what the grip will take.
     void DrawHand(int h, ImDrawList* dl, const ImVec2& size, Reticle::Stats& st)
     {
+        const bool dotOnly = g_Mode.load() == 4;
+        XRInputState input;
+        if (dotOnly && (!VRRuntime::GetInput(input) || !input.hand[h].valid || input.hand[h].held)) return;
         float org[3], fwd[3];
         if (GrabHand::CarryHidesArm(h)) return;    // the hand carrying a corpse is hidden, and so is its ray
         const bool pointer = h == GrabHand::Hand() && GrabHand::Enabled() && PointerRay::Mode() > 0 && PointerRay::Get(h, org, fwd);
@@ -112,7 +119,7 @@ namespace
             if (!GpuTrace::ProjectWorld(w, ndc)) { n = 0; continue; }     // restart the run past the eye plane
             pts[n++] = ToScreen(ndc, size);
         }
-        if (n >= 2) dl->AddPolyline(pts, n, kColDim[h], 0, 2.0f);
+        if (!dotOnly && n >= 2) dl->AddPolyline(pts, n, kColDim[h], 0, 2.0f);
 
         // The ring at the end.
         float ndc[2], depth = 0;
@@ -120,6 +127,14 @@ namespace
         st.projValid |= 1 << h;
         const ImVec2 c = ToScreen(ndc, size);
         if (!pointer && h == HandAimHook::GunHand()) GunRay::NoteRing(c.x / size.x, c.y / size.y);   // the gun hand's ring, either mode (test scripts aim with it)
+        if (dotOnly)
+        {   // Scene-projected per eye, never a head-relative HUD-plane marker.
+            const float radius = std::clamp(size.y * 0.0012f, 1.5f, 6.f);
+            dl->AddCircleFilled(c, radius + 1.f, IM_COL32(0, 0, 0, 210), 16);
+            dl->AddCircleFilled(c, radius, IM_COL32(245, 245, 245, 240), 16);
+            st.drawn++;
+            return;
+        }
         const float rad = size.y * 0.012f;                  // a fixed angular size reads as a reticle; range does not
         dl->AddCircle(c, rad, kCol[h], 24, 2.0f);
         if (engineTarget) dl->AddCircleFilled(c, rad, kColHit[h], 24);
@@ -230,6 +245,7 @@ void Reticle::Draw()
     // Not over a menu. The reticle is aimed at the world, and while a menu is up there is nothing to aim at --
     // it was drawn straight across the main menu before this check.
     if (KbmInject::GetStats().menuSafe) return;
+    if (mode == 4 && KbmInject::GetStats().mode != 0) return;
     // Nor during a takedown: the hands are the animation's, and a ray from a controller they are not attached to
     // points at nothing the player can act on.
     if (GpuTrace::AnimSuspended()) return;
@@ -240,6 +256,7 @@ void Reticle::Draw()
     // stereo the two eyes' projections differ (CameraHook::ApplyEyeProjection)
     struct ProjScope { ProjScope() { GpuTrace::ProjectForSerial(VRRuntime::PresentingSerial()); } ~ProjScope() { GpuTrace::ProjectForSerial(0); } } projScope;
     Stats st; st.frames = 1;
+    if (mode == 4) DrawHand(0, dl, size, st);
     if (mode == 1 || mode == 2) DrawHand(HandAimHook::PowerHand() & 1, dl, size, st);
     if (mode == 1 || mode == 3)
     {
@@ -268,7 +285,26 @@ void Reticle::Draw()
     g_Stats.handValid = st.handValid; g_Stats.projValid = st.projValid; g_Stats.engineTarget = st.engineTarget;
 }
 
-void Reticle::SetMode(int m) { g_Mode = m; }
+void Reticle::OnPresent()
+{
+    if (!CVars::Available()) return;
+    const auto xr = VRRuntime::GetStatus();
+    const bool replace = g_Mode.load() == 4 && xr.running && KbmInject::GetStats().mode == 0;
+    if (replace && !g_CrosshairOwned)
+    {
+        if (!CVars::Address("ark_ui_crosshair_style")) return;
+        g_SavedCrosshair = CVars::GetInt("ark_ui_crosshair_style", 2);
+        g_CrosshairOwned = CVars::SetInt("ark_ui_crosshair_style", 0);
+    }
+    else if (!replace && g_CrosshairOwned)
+    {
+        if (CVars::GetInt("ark_ui_crosshair_style", -1) == 0)
+            CVars::SetInt("ark_ui_crosshair_style", g_SavedCrosshair);
+        g_CrosshairOwned = false;
+    }
+}
+
+void Reticle::SetMode(int m) { g_Mode = std::clamp(m, 0, 4); }
 void Reticle::AddMark(const float* w) { std::lock_guard lk(g_M); if (g_Marks.size() < 32) g_Marks.push_back({ w[0], w[1], w[2] }); }
 void Reticle::ClearMarks() { std::lock_guard lk(g_M); g_Marks.clear(); }
 void Reticle::SetAxes(int on) { g_Axes = on; }

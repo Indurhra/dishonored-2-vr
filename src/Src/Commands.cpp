@@ -1122,7 +1122,7 @@ namespace
             else if (what == "movepwm") { int m = 0; ss >> m; KbmInject::SetMovePwm(m); LOGI("cmd vr movepwm {}", m); }
 
             else if (what == "menuinput") { int m = 0; ss >> m; KbmInject::SetMenuInput(m); LOGI("cmd vr menuinput {}", m); }
-            // 0 off, 1 both hands, 2 the power hand only, 3 the gun hand only; reticlerange = where the ring sits
+            // 0 off, 1 both rays, 2 power ray, 3 gun ray, 4 left-hand dot; reticlerange = fallback range
             // along the ray when the engine has not computed a landing point (metres).
             else if (what == "reticle") { int m = 1; ss >> m; Reticle::SetMode(m); LOGI("cmd vr reticle {}", m); }
             else if (what == "handaxes") { int m = 1; ss >> m; Reticle::SetAxes(m); LOGI("cmd vr handaxes {}", m); }
