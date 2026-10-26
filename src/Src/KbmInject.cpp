@@ -1283,7 +1283,10 @@ void KbmInject::Tick()
         VRRuntime::GetStatus().state==5,in.hand[0].valid && !in.hand[0].held,
         (holding && grabHand==0) || letsL || LiveWheel::Active() || g_Possessing || (g_Latched & kVTrigL),in.triggerL);
     // L trigger: power / weapon (left hand) -- not while the left hand holds an object.
-    Hold(kRMB, (live & kVTrigL) != 0 && !(holding && grabHand == 0) && !letsL);
+    const auto triggerRuntime = VRRuntime::GetStatus();
+    const bool lateWeaponFire = !dvrpsvr2::Headset(triggerRuntime.runtime, triggerRuntime.system)
+        || dvrpsvr2::WeaponFire(Psvr2Triggers::Item(), in.triggerL, g_Held[kRMB]);
+    Hold(kRMB, (live & kVTrigL) != 0 && !(holding && grabHand == 0) && !letsL && lateWeaponFire);
     ThrowGesture::Tick(in, (live & kVTrigL) != 0);        // ...and a grenade leaves with the hand's velocity when it opens
     MenuButton(live, quick);
     // Right stick up / down: health / mana potion. Only a clearly vertical push, and once per push.

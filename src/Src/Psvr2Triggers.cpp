@@ -19,7 +19,8 @@ bool Readable(const void* p,size_t n) {
 }
 Profile Classify(uintptr_t vt) {
     const auto base=GameInfo::Base();
-    if(vt==base+BodyHide::kGunCpntVtable || vt==base+BodyHide::kCrossbowCpntVtable) return Profile::Gun;
+    if(vt==base+BodyHide::kGunCpntVtable) return Profile::Gun;
+    if(vt==base+BodyHide::kCrossbowCpntVtable) return Profile::Crossbow;
     // MSVC x64 RTTI points to immutable image data. Inspect only on item-class changes.
     if(vt<base+8 || vt>=base+0x4000000 || !Readable((void*)(vt-8),8)) return Profile::Off;
     auto col=*(const unsigned char**)(vt-8);
@@ -48,7 +49,7 @@ bool Connect() {
         LOGI("PSVR2: bridge could not start ({})",GetLastError());return false;
     }
     helper=pi.hProcess;CloseHandle(pi.hThread);
-    LOGI("PSVR2: left-trigger bridge started; gun 2/3/3, power vibration 60 Hz amplitude 1");return true;
+    LOGI("PSVR2: left-trigger bridge started; pistol 2/3/5, crossbow 2/3/7, power vibration 60 Hz amplitude 1");return true;
 }
 }
 void Psvr2Triggers::ObserveEquipment(void* player) {
@@ -96,7 +97,7 @@ void Psvr2Triggers::Update(Profile desired) {
     if(WaitForSingleObject(helper,0)!=WAIT_TIMEOUT) return;
     publish(shared,desired);
     static Profile last=Profile::Off;
-    if(last!=desired) {last=desired;LOGI("PSVR2: left trigger profile {} (0 off, 1 gun, 2 power)",(unsigned)desired);}
+    if(last!=desired) {last=desired;LOGI("PSVR2: left trigger profile {} (0 off, 1 pistol, 2 power, 3 crossbow)",(unsigned)desired);}
 }
 void Psvr2Triggers::Stop() {
     observe=false;

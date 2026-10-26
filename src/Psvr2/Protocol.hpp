@@ -4,7 +4,7 @@
 namespace dvrpsvr2 {
 constexpr std::uint32_t magic = 0x32525644;
 constexpr std::uint32_t leaseMs = 250;
-enum class Profile : std::uint8_t { Off, Gun, Power };
+enum class Profile : std::uint8_t { Off, Gun, Power, Crossbow };
 enum class Status : long { Stopped, Starting, Ready, LoaderMissing, CapiMissing,
     ExportMissing, InitFailed, DriverInactive, CommandFailed, ResetFailed, BadProtocol };
 
@@ -16,7 +16,7 @@ inline Desired decode(std::uint64_t word, std::uint32_t now, bool focused) {
     const auto profile = unsigned(word & 0xff);
     const auto hand = unsigned((word >> 8) & 0xff);
     if (!focused || hand != 0 || (word & 0xffff0000ULL) != 0
-        || profile > unsigned(Profile::Power)
+        || profile > unsigned(Profile::Crossbow)
         || std::uint32_t(now - std::uint32_t(word >> 32)) >= leaseMs)
         return {};
     return {Profile(profile), hand};

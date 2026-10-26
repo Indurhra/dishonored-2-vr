@@ -15,6 +15,10 @@ inline bool PowerClass(std::string_view name) {
     }
     return false;
 }
+inline bool WeaponFire(Profile item, float pull, bool held) {
+    if(item!=Profile::Gun && item!=Profile::Crossbow) return true;
+    return pull >= (held ? 0.70f : 0.80f);
+}
 inline Profile Choose(Profile item,bool play,bool focused,bool tracked,bool blocked,float pull) {
     if(!play || !focused || !tracked || blocked) return Profile::Off;
     if(item==Profile::Power && pull<0.12f) return Profile::Off;

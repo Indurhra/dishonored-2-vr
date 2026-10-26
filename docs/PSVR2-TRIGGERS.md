@@ -84,3 +84,19 @@ Copied eye-tracking/VRS values are configuration parity, not proof of active
 foveation: startup diagnostics still reported tracker_created=0, so no gaze-based
 performance benefit is claimed. Logs and registry backup are local under
 local/black-screen-20261026. Current wheel/artwork and all other mods are retained.
+
+## Heavier weapons and late firing (2026-10-26)
+Installed a separate build based on 0baafff plus only the trigger changes; pending
+Commands/ViewMatrixHook rendering experiments were excluded. Pistol uses weapon
+mode 2/3/5; crossbow has distinct profile 3 and uses 2/3/7. Power bytes remain
+position 2, amplitude 1, frequency 60. Helper still exclusively targets Left.
+PSVR2 pistol/crossbow firing now requires analog pull >=0.80, stays held down to
+0.70, and retains existing gameplay/latch/grab gates. Powers, menus, right trigger,
+and other headsets retain their existing input thresholds. Physical snap-to-shot
+alignment requires user testing; motor zones are not normalized analog positions.
+All eight host tests passed including updated profile/threshold checks and the
+existing fake-Toolkit IPC integration. Installed files hash-verified:
+DLL 018FC6DD55828008D6DAB5C4213091B4FB99D81DF842D7B34656C8FF700592A8
+Bridge 3137D4B0ABA539EED031ECCA3054341678BC61E9FFE9323FF5796719F861D6CA
+Backup: local/heavy-triggers-backup-20261026-213033. Game left closed for user test.
+No CPU power, cooling, rendering settings, INI, or Toolkit installation changes.

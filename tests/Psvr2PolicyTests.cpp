@@ -21,9 +21,18 @@ int main() {
     check(Choose(Profile::Gun,true,false,true,false,1)==Profile::Off);
     check(Choose(Profile::Gun,true,true,false,false,1)==Profile::Off);
     check(Choose(Profile::Gun,true,true,true,true,1)==Profile::Off);
+    for(auto p:{Profile::Gun,Profile::Crossbow}) {
+        check(!WeaponFire(p,.79f,false)); check(WeaponFire(p,.80f,false));
+        check(WeaponFire(p,.75f,true)); check(!WeaponFire(p,.69f,true));
+    }
+    check(WeaponFire(Profile::Power,.2f,false));
     auto gun=makeCommand(Profile::Gun);
     check(gun.mode==SCE_PAD_TRIGGER_EFFECT_MODE_WEAPON && gun.commandData.weaponParam.startPosition==2 &&
-        gun.commandData.weaponParam.endPosition==3 && gun.commandData.weaponParam.strength==3);
+        gun.commandData.weaponParam.endPosition==3 && gun.commandData.weaponParam.strength==5);
+    auto bow=makeCommand(Profile::Crossbow);
+    check(bow.mode==SCE_PAD_TRIGGER_EFFECT_MODE_WEAPON && bow.commandData.weaponParam.startPosition==2 && bow.commandData.weaponParam.endPosition==3 && bow.commandData.weaponParam.strength==7);
+    check(decode(pack(100,Profile::Crossbow,0),101,true).profile==Profile::Crossbow);
+    check(decode(pack(100,Profile::Crossbow,1),101,true).profile==Profile::Off);
     auto power=makeCommand(Profile::Power);
     check(power.mode==SCE_PAD_TRIGGER_EFFECT_MODE_VIBRATION && power.commandData.vibrationParam.amplitude==1 && power.commandData.vibrationParam.frequency==60);
     check(decode(pack(100,Profile::Gun,0),101,true).profile==Profile::Gun);
