@@ -168,4 +168,5 @@ capture is local/fps-blur-repair/DVR_effects_off_eye0.png. Baseline and repaired
 logs/heartbeats are retained in that local directory, plus final startup readback.
 Release build and all eight host checks pass. Trigger/haptic policy, body settings
 and Toolkit settings are unchanged. Simulator overrides are removed after testing;
-pre-test saves, game config and hand calibration are restored.
+saves and game config were verified byte-for-byte unchanged and left untouched.
+Simulator-altered hand calibration was restored after backing up the current files.
