@@ -274,6 +274,7 @@ bool BodyView::Command(const std::string& what, std::istringstream& ss)
         return true;
     }
     if (what == "pivotfix") { int m = 1; ss >> m; ViewMatrixHook::SetPivotFix(m != 0); return true; }
+    if (what == "handscale") { float scale = 1.f; ss >> scale; GpuTrace::SetHandScale(scale); return true; }
     if (what == "armlen") { float m = 0.56f, k = 0.f; ss >> m >> k; GpuTrace::SetArmLength(m, k); return true; }
     if (what == "posesource") { int m = 4; ss >> m; VRRuntime::SetPoseSource(m); return true; }
     if (what == "pipetrace") { int n = 6; ss >> n; PipeTrace::Start(n); return true; }

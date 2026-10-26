@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "ArmCalibration.h"
 #include "GpuTrace.h"
 #include "PipeTrace.h"
 #include "PlayerState.h"
@@ -889,6 +890,7 @@ namespace
     {
         unsigned long long frame = 0; bool valid = false;
         Rigid dh, du, dbody, rf0; float ax[3] = {}; float twist = 0; float E[3] = {}, Ep[3] = {};
+        float handScale = 1.f; float palmPivot[3] = {}; // per-view calibration, also retained by temporal/effect snapshots
         float k = 1.f;                            // segment scale (g_ArmLen): upper arm about Sp along Ep-Sp, forearm about Ep along ax
         float S[3] = {}, Sp[3] = {}, W[3] = {}, Wp[3] = {}; float L1 = 0, L2 = 0, reach = 0; bool stretched = false;
         Rigid m2w; float head[3] = {}, ctrl[3] = {};    // for the log: model->world, the head and the controller in world space
@@ -918,6 +920,7 @@ namespace
     // and up, in front of the face (measured, arm forward and arm up). Now the segments are lengthened towards g_ArmLen
     // first (a scale along each bone, at most g_ArmScaleMax), and only beyond that does the shoulder follow.
     std::atomic<float> g_ArmLen{ 0.56f }, g_ArmScaleMax{ 1.15f };
+    std::atomic<float> g_HandScale{ 1.f };
     std::atomic<float> g_Pole[3] = { -0.2f, 0.4f, -0.8f };             // fwd, outward, up: which way the elbow points
     std::atomic<float> g_ForearmPrior{ 0.26f }, g_UpperPrior{ 0.30f };  // wrist->elbow, elbow->shoulder (m), until measured
     std::atomic<int> g_FullDrawsLive[2], g_FullDraws[2], g_BodyDrawsLive, g_BodyDraws, g_FullNoTableLive, g_FullNoTable, g_FullNoFrameLive, g_FullNoFrame;
@@ -2543,6 +2546,11 @@ namespace
         const float L1 = sqrtf(Dot3(se, se)), L2 = sqrtf(Dot3(ew, ew));
         if (!(L1 > 0.05f) || !(L2 > 0.05f) || !std::isfinite(L1 + L2)) return false;
         float Wp[3]; Xform(dh, W, Wp);                                  // the wrist goes with the hand
+        // Weapon grips are learned at native size. Do not shrink a hand off its
+        // weapon: calibrate empty/casting hands only until equipment has its own fit.
+        F.handScale = ai.palmTgtValid && !ai.gripApplied ? g_HandScale.load() : 1.f;
+        Xform(Inv(m2r), palmT.t, F.palmPivot);
+        for (int i = 0; i < 3; ++i) Wp[i] = F.palmPivot[i] + F.handScale * (Wp[i] - F.palmPivot[i]);
         // the drawn arm towards the real arm's length (g_ArmLen), never shorter than the game's own
         float ks = 1.f;
         { const float want = g_ArmLen.load(); if (want > 0.f) ks = std::clamp(want / (L1 + L2), 1.f, std::max(1.f, g_ArmScaleMax.load())); }
@@ -2601,7 +2609,7 @@ namespace
     {
         switch (T.seg[b])
         {
-        case sgHand:  D = F.dh; return true;
+        case sgHand:  D = F.dh; ArmCalibration::ScaleAbout(D.r, D.t, F.palmPivot, F.handScale); return true;
         case sgUpper:
         {
             D = F.du;
@@ -5060,6 +5068,7 @@ bool GpuTrace::AnimSuspended() { return g_AnimSuspend.load(); }
 unsigned long long GpuTrace::AnimSuspendedDraws() { return g_AnimSuspended.load(); }
 int  GpuTrace::ArmMode() { return g_ArmMode; }
 void GpuTrace::SetBodyFollow(int on) { g_BodyFollow = on; }
+void GpuTrace::SetHandScale(float scale) { g_HandScale = ArmCalibration::HandScale(scale); LOGI("gpubody: empty/casting hand scale {} (native size when gripping equipment)", g_HandScale.load()); }
 void GpuTrace::SetArmLength(float metres, float maxScale) { g_ArmLen = metres; if (maxScale > 0.f) g_ArmScaleMax = maxScale; LOGI("gpubody: drawn arm lengthened towards {:.2f} m (at most x{:.2f})", g_ArmLen.load(), g_ArmScaleMax.load()); }
 void GpuTrace::SetShoulder(float fwd, float out, float up) { g_ShoulderOff[0] = fwd; g_ShoulderOff[1] = out; g_ShoulderOff[2] = up; }
 void GpuTrace::SetPole(float fwd, float out, float up) { g_Pole[0] = fwd; g_Pole[1] = out; g_Pole[2] = up; }
@@ -5414,6 +5423,7 @@ bool GpuTrace::ArmCorrectJoint(int side, int /*joint*/, float pos[3], float axis
         Rigid Dp = D;
         if (F.k != 1.f && sg == sgUpper) { float u[3]; Sub3(F.Ep, F.Sp, u); Dp = Mul(StretchAbout(F.Sp, u, F.k), D); }
         if (F.k != 1.f && sg == sgFore) Dp = Mul(StretchAbout(F.Ep, F.ax, F.k), D);
+        if (sg == sgHand) ArmCalibration::ScaleAbout(Dp.r, Dp.t, F.palmPivot, F.handScale);
         Xform(Dp, p, pos);
     }
     for (int k = 0; k < 3; k++) { const float row[3] = { axis[k * 3], axis[k * 3 + 1], axis[k * 3 + 2] }; Rotate(D, row, axis + k * 3); }

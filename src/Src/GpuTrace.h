@@ -252,6 +252,7 @@ namespace GpuTrace
     void SetShoulder(float fwd, float out, float up);
     //! The drawn arm's shoulder-to-wrist length target (m, 0 = the game's own) and the largest stretch allowed.
     void SetArmLength(float metres, float maxScale = 0.f);
+    void SetHandScale(float scale);              //!< empty/casting hands, about their tracked palm; 1 = native
     //! Which way the elbow points (fwd, outward, up in the body frame): the IK's pole vector.
     void SetPole(float fwd, float out, float up);
     //! Segment lengths assumed until the joints are measured from the animation: wrist->elbow, elbow->shoulder.

@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.25)
+project(DVRHostChecks LANGUAGES CXX)
+enable_testing()
+add_executable(arm_calibration ArmCalibrationTests.cpp)
+target_compile_features(arm_calibration PRIVATE cxx_std_17)
+add_test(NAME arm_calibration COMMAND arm_calibration)
