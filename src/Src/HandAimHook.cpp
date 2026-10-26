@@ -10,6 +10,7 @@
 #include "TestAids.h"
 #include "WeaponPose.h"
 #include "GunRay.h"
+#include "GpuTrace.h"
 #include <detours/detours.h>
 #include <cmath>
 
@@ -69,8 +70,9 @@ namespace
     //! `eyePosXr` (optional) is the XR-space position the caller's anchor was built from; without it the offset is
     //! taken from the head midpoint, which is what the game camera corresponds to.
     bool CtrlPose(int hand, const float eyeOrg[3], const float viewAxis[9], float org[3], float axis[9],
-                  const float* eyePosXr = nullptr, const XRInputState* given = nullptr, const float* headQuat = nullptr)
+                  const float* eyePosXr = nullptr, const XRInputState* given = nullptr, const float* headQuat = nullptr, bool measurement = false)
     {
+        if (!measurement && GpuTrace::AnimSuspended()) return false;
         XRInputState in;
         if (given) in = *given; else if (!VRRuntime::GetInput(in)) return false;
         if (!in.hand[hand].valid) return false;
@@ -224,7 +226,7 @@ namespace
         }
         {   // arms follow the controllers (see SetArmsFollow): per-arm aiming angles relative to the view, limits widened
             uint8_t* o = (uint8_t*)self; float* lim = (float*)(o + HandAimHook::kLeftArmAiming);
-            if (g_ArmsFollow.load())
+            if (g_ArmsFollow.load() && !GpuTrace::AnimSuspended())
             {
                 if (!g_LimitsSaved) { memcpy(g_SavedLimits, lim, 72); g_LimitsSaved = true; }
                 const float* co; const float* ca;
@@ -607,12 +609,12 @@ int HandAimHook::PowerHand() { return g_PowerHand; }
 bool HandAimHook::ControllerPose(int hand, float org[3], float axis[9])
 {
     const float* co; const float* ca; if (!RealCam(co, ca)) return false;
-    return CtrlPose(hand, co, ca, org, axis);
+    return CtrlPose(hand, co, ca, org, axis, nullptr, nullptr, nullptr, true);
 }
 bool HandAimHook::ControllerPoseAt(int hand, const float eyeOrg[3], const float viewAxis[9], const float eyePosXr[3],
                                    float org[3], float axis[9], const XRInputState* in, const float* headQuat)
 {
-    return CtrlPose(hand, eyeOrg, viewAxis, org, axis, eyePosXr, in, headQuat);
+    return CtrlPose(hand, eyeOrg, viewAxis, org, axis, eyePosXr, in, headQuat, true);
 }
 void HandAimHook::XrOffsetToWorld(const float dXr[3], const float viewAxis[9], float out[3], const float* headQuat) { XrOffsetToWorldImpl(dXr, viewAxis, out, headQuat); }
 void* HandAimHook::CameraObject() { return g_Cam.load(); }

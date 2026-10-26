@@ -245,6 +245,8 @@ namespace GpuTrace
     //! are still identified and counted (FirstPersonDraws), only not rewritten; WeaponTargetPose reports nothing.
     void SetAnimSuspend(bool on);
     bool AnimSuspended();
+    void SetArmHandback(float seconds);
+    float ArmControlWeight();
     unsigned long long AnimSuspendedDraws();
     //! The player entity's own models (torso, legs) follow the HMD body frame: leaning and crouching move them.
     void SetBodyFollow(int on);
@@ -252,6 +254,7 @@ namespace GpuTrace
     void SetShoulder(float fwd, float out, float up);
     //! The drawn arm's shoulder-to-wrist length target (m, 0 = the game's own) and the largest stretch allowed.
     void SetArmLength(float metres, float maxScale = 0.f);
+    void SetEquippedHandScale(float scale);
     void SetHandScale(float scale);              //!< empty/casting hands, about their tracked palm; 1 = native
     //! Which way the elbow points (fwd, outward, up in the body frame): the IK's pole vector.
     void SetPole(float fwd, float out, float up);

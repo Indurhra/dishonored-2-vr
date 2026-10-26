@@ -50,7 +50,7 @@ namespace
     void SetOriginAxisHook(void* self, const float* org, const float* axis)
     {
         { std::lock_guard lk(g_M); g_Stats.tsetCalls++; }
-        if (g_Enabled.load())
+        if (g_Enabled.load() && !GpuTrace::AnimSuspended())
         {
             int hand = -1;
             int mode = g_Enabled.load();
@@ -97,7 +97,7 @@ namespace
                 }
             }
         }
-        if (!g_Enabled.load()) return r;
+        if (!g_Enabled.load() || GpuTrace::AnimSuspended()) return r;
         if ((g_Enabled.load() & 8) && ent == (uint8_t*)Game::LocalPlayer())
         {   // research: rotate the player entity axis by the right-hand grip yaw and shift it by the grip translation
             float* eo = (float*)(ent + WeaponPose::kEntityOrigin); float* ea = (float*)(ent + WeaponPose::kEntityAxis);

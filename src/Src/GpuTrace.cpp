@@ -1,11 +1,13 @@
 #include "pch.h"
 #include "ArmCalibration.h"
+#include "ArmHandback.h"
 #include "GpuTrace.h"
 #include "PipeTrace.h"
 #include "PlayerState.h"
 #include "GrabHand.h"
 #include "WristHud.h"
 #include "StereoTaa.h"
+#include "StereoSync.h"
 #include "ScreenMode.h"
 #include <detours/detours.h>
 #include <map>
@@ -21,6 +23,7 @@
 #include <d3d11shader.h>
 #include <cmath>
 #include "GameInfo.h"
+#include "Game.h"
 #include "ViewMatrixHook.h"
 #include "HandAimHook.h"
 #include "VRRuntime.h"
@@ -360,6 +363,7 @@ namespace
         float r[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
         float t[3] = {};
     };
+    Rigid BlendRigid(const Rigid& a, const Rigid& b, float t, const float pivot[3]);
     Rigid Mul(const Rigid& a, const Rigid& b)          // a applied after b
     {
         Rigid o;
@@ -477,6 +481,9 @@ namespace
     // draws are still identified and COUNTED -- FirstPersonDraws is what tells gameplay from a menu, and a zero there
     // would make KbmInject release every key, the choke's held Ctrl included.
     std::atomic<bool> g_AnimSuspend{ false };
+    std::atomic<float> g_ResumeSeconds{ .25f }, g_ResumeWeight{ 1.f };
+    std::atomic<ULONGLONG> g_ResumeAt{ 0 };
+    std::atomic<void*> g_ResumeOwner{ nullptr };
     std::atomic<unsigned long long> g_AnimSuspended{ 0 };
     std::atomic<int> g_SixHand{ -1 };          // -1 = whatever hand the fire ray uses
     std::atomic<int> g_Basis{ 0 };
@@ -542,6 +549,7 @@ namespace
     }
 
     std::mutex g_XfM;
+    float g_XfControl = 1.f;                 // handback weight captured with this view
     unsigned long long g_XfSerial = 0;         // the view this cached transform belongs to
     unsigned long long g_XfPresent = 0;        // the Present frame it was taken in
     // Per hand, because both arms are within arm's reach of the eye and would otherwise both follow one controller.
@@ -920,7 +928,7 @@ namespace
     // and up, in front of the face (measured, arm forward and arm up). Now the segments are lengthened towards g_ArmLen
     // first (a scale along each bone, at most g_ArmScaleMax), and only beyond that does the shoulder follow.
     std::atomic<float> g_ArmLen{ 0.56f }, g_ArmScaleMax{ 1.15f };
-    std::atomic<float> g_HandScale{ 1.f };
+    std::atomic<float> g_HandScale{ 1.f }, g_EquippedHandScale{ 1.f };
     std::atomic<float> g_Pole[3] = { -0.2f, 0.4f, -0.8f };             // fwd, outward, up: which way the elbow points
     std::atomic<float> g_ForearmPrior{ 0.26f }, g_UpperPrior{ 0.30f };  // wrist->elbow, elbow->shoulder (m), until measured
     std::atomic<int> g_FullDrawsLive[2], g_FullDraws[2], g_BodyDrawsLive, g_BodyDraws, g_FullNoTableLive, g_FullNoTable, g_FullNoFrameLive, g_FullNoFrame;
@@ -1081,6 +1089,7 @@ namespace
         std::lock_guard lk(g_XfM);
         if (serial == g_XfSerial) return g_XfValid;              // another thread got here first
         if (g_XfValid) { for (int h = 0; h < 2; h++) g_DeltaViewPrev[h] = g_DeltaView[h]; g_XfPrevValid = true; }
+        g_XfControl = g_ResumeWeight.load();
         g_XfSerial = serial; g_XfPresent = g_PresentFrame; g_ViewRigid = vw; g_ViewInv = Inv(vw); g_ViewValid = true;
         memcpy(g_XfViewMat, vm, 64);
         PipeTrace::Event(PipeTrace::Xform, serial);
@@ -1186,7 +1195,8 @@ namespace
                 // Put the weapon IN the hand: delta = hand * gripBase * grip * entity^-1. Every draw of this hand's
                 // equipment gets the same rigid delta, so the body of the weapon and the mods that hang off it at
                 // their own offsets stay together -- what came apart in the previous design.
-                const Rigid target = Mul(Mul(hw[h], g_GripBase[h]), grip);
+                Rigid target = Mul(Mul(hw[h], g_GripBase[h]), grip);
+                if (g_XfControl < 1.f) { const float zero[3]={}; target=BlendRigid(ent,target,g_XfControl,zero); }
                 deltaWorld[h] = Mul(target, Inv(ent));
                 g_TargetPose[h] = target; g_TargetValid[h] = true; g_HandPose[h] = hw[h];
             }
@@ -1274,6 +1284,7 @@ namespace
         Rigid pose, vw, palmTgt; bool palmTgtValid = false; int palm = -1; float palmC[3] = {}; unsigned long long serial = 0;
         uint64_t palHash = 0;                    // the palette content the hand delta was computed from
         Rigid prevPose; bool prevValid = false;  // the draw's PREVIOUS-frame model->view (its motion-vector matrix)
+        float control = 1.f;
         int grip = -1; bool gripApplied = false; // the weapon grip of this hand (g_Grips index) and whether the palm was posed from it
     };
     //! FNV-1a over a palette's bone matrices: tells two reads of the same buffer apart when the game rewrote it between.
@@ -1299,11 +1310,11 @@ namespace
         Rigid dvH[2], dvPrevH[2], dwH[2], vinv, vw, targetH[2], handH[2]; bool targetValid[2];
         float cam[3], camAxis[9]; bool haveCam;
         BodyHide::Anchor anch[BodyHide::aCount];
-        Rigid bodyW, bodyVr; bool bodyValid; int entStable[2]; unsigned long long xfSerial;
+        Rigid bodyW, bodyVr; bool bodyValid; int entStable[2]; unsigned long long xfSerial; float control;
         {
             std::lock_guard lk(g_XfM);
             if (!g_XfValid) return false;
-            xfSerial = g_XfSerial;
+            xfSerial = g_XfSerial; control = g_XfControl;
             for (int h = 0; h < 2; h++)
             { dvH[h] = g_DeltaView[h]; dvPrevH[h] = g_DeltaViewPrev[h]; dwH[h] = g_DeltaWorld[h]; targetH[h] = g_TargetPose[h]; targetValid[h] = g_TargetValid[h]; handH[h] = g_HandPose[h]; }
             vinv = g_ViewInv; vw = g_ViewRigid; haveCam = g_GameCamValid; memcpy(cam, g_GameCam, 12); memcpy(camAxis, g_GameCamAxis, 36);
@@ -1311,6 +1322,7 @@ namespace
             bodyW = g_BodyDelta; bodyVr = g_BodyVr; bodyValid = g_BodyValid;
             entStable[0] = g_EntStable[0]; entStable[1] = g_EntStable[1];
         }
+        if (ai) ai->control = control;
         Rigid ownDv; bool useOwnDv = false;      // an arm draw whose hand pose comes from the palette, not the equipment entity
         bool torso = false;                      // a draw of the player entity's own models (torso, legs): follows the HMD body frame
         const bool fullArm = g_ArmMode.load() == 1;
@@ -1531,7 +1543,13 @@ namespace
                             ai->grip = gl.valid ? gl.idx : -1; ai->gripApplied = gripApply;
                             if (gripApply)
                             {   // the palm where the weapon AS DRAWN holds it: target * (palm in the entity's frame)
-                                const Rigid dw = Mul(Mul(targetH[side], gl.rel), Inv(Pw));
+                                Rigid rel=gl.rel;
+                                if (control<1.f)
+                                {
+                                    Rigid ent; for(int i=0;i<3;++i) { ent.r[i*3]=wa.axis[i];ent.r[i*3+1]=wa.axis[3+i];ent.r[i*3+2]=wa.axis[6+i];ent.t[i]=wa.org[i]; }
+                                    const float zero[3]={}; rel=BlendRigid(Mul(Inv(ent),Pw),rel,control,zero);
+                                }
+                                const Rigid dw = Mul(Mul(targetH[side], rel), Inv(Pw));
                                 ownDv = Mul(vw, Mul(dw, Inv(vw)));
                                 useOwnDv = true; handDeltaW = dw;
                                 g_GripUsed[side]++;
@@ -1682,7 +1700,12 @@ namespace
                             {   // Where the hand ENDS UP, kept for the axes overlay. Judging a hand from its
                                 // silhouette does not work (a fanned black glove has no readable direction, and it
                                 // cost two wrong conclusions), so the palm frame gets drawn into the image instead.
-                                const Rigid pf = Mul(handDeltaW, Pw);
+                                Rigid pf = Mul(handDeltaW, Pw);
+                                if (!gripApply && control<1.f)
+                                {
+                                    const float zero[3]={};pf=BlendRigid(Pw,pf,control,zero);
+                                    handDeltaW=Mul(pf,Inv(Pw));ownDv=Mul(vw,Mul(handDeltaW,Inv(vw)));useOwnDv=true;
+                                }
                                 ai->palmTgt = pf; ai->palmTgtValid = true; ai->palm = ab.palm; memcpy(ai->palmC, ab.c[ab.palm], 12);
                                 std::lock_guard lp(g_PalmM);
 
@@ -2546,26 +2569,40 @@ namespace
         const float L1 = sqrtf(Dot3(se, se)), L2 = sqrtf(Dot3(ew, ew));
         if (!(L1 > 0.05f) || !(L2 > 0.05f) || !std::isfinite(L1 + L2)) return false;
         float Wp[3]; Xform(dh, W, Wp);                                  // the wrist goes with the hand
-        // Weapon grips are learned at native size. Do not shrink a hand off its
-        // weapon: calibrate empty/casting hands only until equipment has its own fit.
-        F.handScale = ai.palmTgtValid && !ai.gripApplied ? g_HandScale.load() : 1.f;
+        // Keep the learned palm anchor and equipment size. Equipped fit is a
+        // separate calibration so existing grip profiles remain intact.
+        const float control=ai.control;
+        F.handScale = ai.palmTgtValid ? 1.f+((ai.gripApplied ? g_EquippedHandScale.load() : g_HandScale.load())-1.f)*control : 1.f;
         Xform(Inv(m2r), palmT.t, F.palmPivot);
         for (int i = 0; i < 3; ++i) Wp[i] = F.palmPivot[i] + F.handScale * (Wp[i] - F.palmPivot[i]);
         // the drawn arm towards the real arm's length (g_ArmLen), never shorter than the game's own
         float ks = 1.f;
         { const float want = g_ArmLen.load(); if (want > 0.f) ks = std::clamp(want / (L1 + L2), 1.f, std::max(1.f, g_ArmScaleMax.load())); }
+        ks=1.f+(ks-1.f)*control;
         const float L1k = L1 * ks, L2k = L2 * ks;
         // the shoulder under the head, and the elbow hint, in model space
         const Rigid m2wInv = Inv(m2r);
         const float sgn = side == 0 ? 1.f : -1.f;
         const float offL[3] = { g_ShoulderOff[0].load(), sgn * g_ShoulderOff[1].load(), g_ShoulderOff[2].load() };
         float Sw[3], Sp[3]; Xform(bodyVr, offL, Sw); Xform(m2wInv, Sw, Sp);
+        for(int i=0;i<3;++i) Sp[i]=S[i]+control*(Sp[i]-S[i]);
         const float poleL[3] = { g_Pole[0].load(), sgn * g_Pole[1].load(), g_Pole[2].load() };
         float poleW[3], pole[3]; Rotate(bodyVr, poleL, poleW); Rotate(m2wInv, poleW, pole); Norm3(pole);
         // two-bone IK: the elbow on the circle where both segments reach, towards the hint
         float along[3]; Sub3(Wp, Sp, along); float d = Norm3(along);
         if (d < 1e-4f) { along[0] = -pole[0]; along[1] = -pole[1]; along[2] = -pole[2]; }
-        const float maxr = 0.995f * (L1k + L2k), minr = fabsf(L1k - L2k) + 0.01f;
+        if (control<1.f)
+        {
+            float native[3], desired[3], cross[3];Sub3(E,S,native);
+            const float np=Dot3(native,along),dp=Dot3(pole,along);
+            for(int i=0;i<3;++i) { native[i]-=np*along[i];desired[i]=pole[i]-dp*along[i]; }
+            if(Norm3(native)<1e-4f) AnyPerp(along,native);
+            if(Norm3(desired)<1e-4f) AnyPerp(along,desired);
+            Cross3(native,desired,cross);
+            const float angle=atan2f(Dot3(cross,along),Dot3(native,desired));
+            Rotate(AxisAngle(along,angle*control),native,pole);
+        }
+        const float maxr = (1.f-.005f*control) * (L1k + L2k), minr = fabsf(L1k - L2k) + .01f*control;
         bool stretched = false;
         if (d > maxr) { for (int i = 0; i < 3; i++) Sp[i] = Wp[i] - along[i] * maxr; d = maxr; stretched = true; }   // the shoulder follows the hand
         if (d < minr) { for (int i = 0; i < 3; i++) Sp[i] = Wp[i] - along[i] * minr; d = minr; }
@@ -2588,6 +2625,7 @@ namespace
         float cr[3]; Cross3(re, rh, cr);
         float twist = atan2f(Dot3(cr, ax), Dot3(re, rh)); if (!std::isfinite(twist)) twist = 0.f;
         F.dbody = ai.bodyValid ? Mul(m2wInv, Mul(bodyW, m2r)) : Rigid();
+        if(control<1.f) F.dbody=BlendRigid(Rigid(),F.dbody,control,S);
         F.dh = dh; F.du = du; F.rf0 = rf0; memcpy(F.ax, ax, 12); F.twist = twist;
         memcpy(F.E, E, 12); memcpy(F.Ep, Ep, 12); memcpy(F.S, S, 12); memcpy(F.Sp, Sp, 12); memcpy(F.W, W, 12); memcpy(F.Wp, Wp, 12);
         F.L1 = L1k; F.L2 = L2k; F.reach = d; F.stretched = stretched; F.k = ks;
@@ -4625,6 +4663,15 @@ namespace
 
 void GpuTrace::OnPresent()
 {
+    // Advance after the right view, so the next left/right pair shares one weight.
+    // Outside paired play (menus, fallback mono) every Present may advance it.
+    if (!g_AnimSuspend.load() && (!StereoSync::Active() || !StereoSync::PairWanted() || StereoSync::LastFrameHeld()))
+    {
+        const auto at=g_ResumeAt.load();
+        if(at && Game::LocalPlayer()==g_ResumeOwner.load())
+            g_ResumeWeight=ArmHandback::Weight((GetTickCount64()-at)*.001f,g_ResumeSeconds.load());
+        else { g_ResumeAt=0;g_ResumeWeight=1.f; }
+    }
     RehookImmediate();
     if (g_CapturedVS) { DumpShader(g_CapturedVS); g_CapturedVS = nullptr; }
     FlushConstantDump();
@@ -4703,7 +4750,7 @@ void GpuTrace::OnPresent()
             for (const char* n : { "Sneaking", "AutoCrouch", "WallCrouch", "Sprinting", "Sliding", "Jumping", "InAir", "Falling", "CatFall", "Mantle", "Vault", "Climb", "SwimMantle",
                                    "ShadowWalk", "Slash", "Block", "Draw", "Undraw", "EquipChange", "ReloadWeapon", "FireWeapon", "Recoil", "Leaning", "Peeking", "Choke", "Assassination", "UsePower", "Blinking", "CarryCorpse", "HoldObject", "Interact" })
                 if (PlayerState::Running(n)) { if (!st.empty()) st += ' '; st += n; }
-            std::string t = fmt::format("htrace f {} spd {:.2f} anim {} st [{}]", g_PresentFrame, g_PlayerSpeed.load(), g_AnimSuspend.load() ? 1 : 0, st);
+            std::string t = fmt::format("htrace f {} spd {:.2f} anim {} control {:.4f} st [{}]", g_PresentFrame, g_PlayerSpeed.load(), g_AnimSuspend.load() ? 1 : 0, g_ResumeWeight.load(), st);
             for (int h = 0; h < 2; h++)
             {
                 if (!s[h].valid || g_PresentFrame - s[h].frame > 3) { t += h ? " | R -" : " | L -"; continue; }
@@ -5055,6 +5102,10 @@ void GpuTrace::SetArmMode(int mode) { g_ArmMode = mode; }
 void GpuTrace::SetAnimSuspend(bool on)
 {
     if (g_AnimSuspend.exchange(on) == on) return;
+    g_ResumeOwner=Game::LocalPlayer();
+    g_ResumeAt=on ? 0 : GetTickCount64();
+    g_ResumeWeight=on || g_ResumeSeconds.load()>0.f ? 0.f : 1.f;
+    { std::lock_guard lk(g_FxM); for(auto& fx:g_Fx) fx.valid=false; }
     if (!on)
     {   // The arm rig's stale-palette test reads "main palette not bound for 60 frames" as a level load, and while
         // suspended nothing refreshed it: a 9 s choke would have adopted whichever same-sized sleeve palette came
@@ -5065,10 +5116,13 @@ void GpuTrace::SetAnimSuspend(bool on)
     LOGI("gpu6dof: arms and weapon {} (scripted animation)", on ? "handed to the game" : "back on the controllers");
 }
 bool GpuTrace::AnimSuspended() { return g_AnimSuspend.load(); }
+void GpuTrace::SetArmHandback(float seconds) { g_ResumeSeconds=std::isfinite(seconds) ? std::clamp(seconds,0.f,1.f) : .25f; }
+float GpuTrace::ArmControlWeight() { return g_ResumeWeight.load(); }
 unsigned long long GpuTrace::AnimSuspendedDraws() { return g_AnimSuspended.load(); }
 int  GpuTrace::ArmMode() { return g_ArmMode; }
 void GpuTrace::SetBodyFollow(int on) { g_BodyFollow = on; }
-void GpuTrace::SetHandScale(float scale) { g_HandScale = ArmCalibration::HandScale(scale); LOGI("gpubody: empty/casting hand scale {} (native size when gripping equipment)", g_HandScale.load()); }
+void GpuTrace::SetEquippedHandScale(float scale) { g_EquippedHandScale=ArmCalibration::HandScale(scale); LOGI("gpubody: equipped hand scale {} about learned palm (equipment size retained)",g_EquippedHandScale.load()); }
+void GpuTrace::SetHandScale(float scale) { g_HandScale = ArmCalibration::HandScale(scale); LOGI("gpubody: empty/casting hand scale {} (equipped fit is separate)", g_HandScale.load()); }
 void GpuTrace::SetArmLength(float metres, float maxScale) { g_ArmLen = metres; if (maxScale > 0.f) g_ArmScaleMax = maxScale; LOGI("gpubody: drawn arm lengthened towards {:.2f} m (at most x{:.2f})", g_ArmLen.load(), g_ArmScaleMax.load()); }
 void GpuTrace::SetShoulder(float fwd, float out, float up) { g_ShoulderOff[0] = fwd; g_ShoulderOff[1] = out; g_ShoulderOff[2] = up; }
 void GpuTrace::SetPole(float fwd, float out, float up) { g_Pole[0] = fwd; g_Pole[1] = out; g_Pole[2] = up; }

@@ -802,6 +802,9 @@ void GrabHand::OnPresent()
 
 bool GrabHand::OnJointQuery(void* bindEnt, void* obj, const float* offPos, float* outPos, float* outAxis)
 {
+    if (GpuTrace::AnimSuspended()) return false; // the engine owns scripted hand/object binds
+    const float control=GpuTrace::ArmControlWeight();
+    float nativePos[3],nativeAxis[9];memcpy(nativePos,outPos,12);memcpy(nativeAxis,outAxis,36);
     void* ent = g_Held.load();
     if (!ent || !offPos || !g_On.load() || HandAimHook::Mode() < 2) return false;
     if (bindEnt == ent) g_OffPtr = offPos;
@@ -921,6 +924,11 @@ bool GrabHand::OnJointQuery(void* bindEnt, void* obj, const float* offPos, float
     const float d[3] = { p[0] - mo[0], p[1] - mo[1], p[2] - mo[2] };
     for (int k = 0; k < 3; k++) outPos[k] = Dot(d, mx + 3 * k);
     for (int i = 0; i < 3; i++) for (int k = 0; k < 3; k++) outAxis[i * 3 + k] = Dot(R + 3 * i, mx + 3 * k);
+    if(control<1.f)
+    {
+        for(int k=0;k<3;++k) outPos[k]=nativePos[k]+control*(outPos[k]-nativePos[k]);
+        float targetAxis[9];memcpy(targetAxis,outAxis,36);SlerpRot(nativeAxis,targetAxis,control,outAxis);
+    }
     g_Applied++;
     return true;
 }

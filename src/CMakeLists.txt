@@ -90,7 +90,7 @@ set(MOD_SOURCES
     Src/WeaponPose.cpp Src/WeaponPose.h
     Src/HandFx.cpp     Src/HandFx.h
     Src/Watchpoint.cpp Src/Watchpoint.h
-    Src/GpuTrace.cpp   Src/GpuTrace.h
+    Src/GpuTrace.cpp   Src/GpuTrace.h Src/ArmCalibration.h Src/ArmHandback.h
     Src/Reticle.cpp    Src/Reticle.h
     Src/PlayerState.cpp Src/PlayerState.h
     Src/MeleeAim.cpp   Src/MeleeAim.h

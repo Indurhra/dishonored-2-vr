@@ -258,6 +258,20 @@ void PlayerState::OnPresent()
 {
     if (!g_Installed) return;
     std::lock_guard lk(g_M);
+    static void* statePlayer=nullptr;
+    static void* stateGame=nullptr;
+    void* currentPlayer=Game::LocalPlayer();void* currentGame=Game::GameLocal();
+    if(currentPlayer!=statePlayer || currentGame!=stateGame)
+    {
+        statePlayer=currentPlayer;stateGame=currentGame;
+        for(int c=0;c<kNumStates;++c)
+        {
+            g_AnimSeen[c]=g_Seen[c]=false;
+            for(int slot=0;slot<g_Class[c].slots;++slot) g_Prev[c*kMaxSlots+slot]=g_Count[c*kMaxSlots+slot];
+        }
+        g_RunMask[0]=g_RunMask[1]=0;g_RunCount=0;
+        LOGI("PlayerState: player/game identity changed, discarded previous state observations");
+    }
     g_LastStates = TickedThisFrame(false);
     if (g_TimelineLeft > 0)
     {

@@ -594,7 +594,7 @@ namespace
             // Research: the FP weapon/arm models are skinned, so what places them on screen is the joint matrix
             // buffer, not the transform set (writing/freezing that was measured to change nothing). Find the buffer:
             // walk every pointer inside arkSkinnedRenderModel and report those holding float triplets that sit near
-            // the model's own origin â€” a joint palette in world space looks exactly like that.
+            // the model's own origin — a joint palette in world space looks exactly like that.
             //   modeljoints <hex model addr> [radius m]
             std::string what; ss >> what; float radius = 1.5f; ss >> radius;
             uint8_t* m = (uint8_t*)strtoull(what.c_str(), nullptr, 16);
@@ -1204,7 +1204,7 @@ namespace
             f << "aids " << TestAids::Stats() << "\n";
             f << "handfx " << HandFx::Stats() << "\n";
             f << "trail " << GpuTrace::TrailStats() << "\n";
-            f << "animcam " << ViewMatrixHook::AnimStats() << " armsuspend " << GpuTrace::AnimSuspended() << " suspendeddraws " << GpuTrace::AnimSuspendedDraws()
+            f << "animcam " << ViewMatrixHook::AnimStats() << " armsuspend " << GpuTrace::AnimSuspended() << " suspendeddraws " << GpuTrace::AnimSuspendedDraws() << " armcontrol " << GpuTrace::ArmControlWeight()
               << " animarms " << PlayerState::AnimArms() << " states " << PlayerState::AnimStates() << "\n";
             f << "fpanchor " << HandAimHook::FpAnchor() << " anchorhand " << HandAimHook::AnchorHand()
               << " rvcalls " << hs.rvCalls << " matched " << hs.rvMatched << " applied " << hs.rvApplied << " posefail " << hs.rvPoseFail

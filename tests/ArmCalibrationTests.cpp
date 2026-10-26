@@ -1,4 +1,5 @@
 #include "../src/Src/ArmCalibration.h"
+#include "../src/Src/ArmHandback.h"
 #include <cstdlib>
 #include <limits>
 #include <cstdio>
@@ -33,5 +34,15 @@ int main()
     require(ArmCalibration::HandScale(-1.f)==0.65f,"lower safety bound");
     require(ArmCalibration::HandScale(2.f)==1.15f,"upper safety bound");
     require(ArmCalibration::HandScale(std::numeric_limits<float>::quiet_NaN())==1.f,"invalid input restores native size");
+    require(ArmHandback::Weight(0,.25f)==0,"release starts at animation pose");
+    require(ArmHandback::Weight(.25f,.25f)==1,"tracking fully restored at completion");
+    require(ArmHandback::Weight(1,0)==1,"instant handback remains available");
+    float previous=0;
+    for(int i=0;i<=100;++i)
+    {
+        float w=ArmHandback::Weight(i*.003f,.25f);
+        require(w>=previous && w>=0 && w<=1,"handback remains bounded and monotonic");previous=w;
+    }
+    require(ArmHandback::Weight(std::numeric_limits<float>::quiet_NaN(),.25f)==0,"invalid timing retains animation");
     std::puts("Arm calibration invariants passed");
 }
