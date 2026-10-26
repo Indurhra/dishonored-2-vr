@@ -56,9 +56,9 @@ struct XRState
     XrSwapchain wristSwapchain = XR_NULL_HANDLE;
     std::vector<XrSwapchainImageD3D11KHR> wristImages;
     // Panels in the room (XRPanelLayer): 0 the menu screen, 1 the power wheel.
-    XrSwapchain panelSwapchain[2] = {};
-    std::vector<XrSwapchainImageD3D11KHR> panelImages[2];
-    uint32_t panelW[2] = {}, panelH[2] = {};
+    XrSwapchain panelSwapchain[3] = {};
+    std::vector<XrSwapchainImageD3D11KHR> panelImages[3];
+    uint32_t panelW[3] = {}, panelH[3] = {};
 } g;
 
 double NowSec()
@@ -92,7 +92,7 @@ struct PumpState
     // The last frame's layers, for the keep-alive frames (the wrist watch is left out: it rides the hand).
     XrCompositionLayerProjection proj = { XR_TYPE_COMPOSITION_LAYER_PROJECTION };
     XrCompositionLayerProjectionView views[XRSession::kMaxEyes] = {};
-    XrCompositionLayerQuad quads[4] = {};
+    XrCompositionLayerQuad quads[5] = {};
     int nQuads = 0;
     bool haveLayers = false;
     // the runtime taking the session away (STOPPING -> IDLE without our asking) and not offering it back
@@ -2133,14 +2133,14 @@ void XRSession::EndFrameWithLayers(XrCompositionLayerProjection& layer)
         }
     }
 
-    XrCompositionLayerQuad panel[2] = { { XR_TYPE_COMPOSITION_LAYER_QUAD }, { XR_TYPE_COMPOSITION_LAYER_QUAD } };
-    const bool havePanel[2] = { AppendPanelLayer(0, panel[0]), AppendPanelLayer(1, panel[1]) };
+    XrCompositionLayerQuad panel[3] = { { XR_TYPE_COMPOSITION_LAYER_QUAD }, { XR_TYPE_COMPOSITION_LAYER_QUAD }, { XR_TYPE_COMPOSITION_LAYER_QUAD } };
+    const bool havePanel[3] = { AppendPanelLayer(0, panel[0]), AppendPanelLayer(1, panel[1]), AppendPanelLayer(2, panel[2]) };
     XrCompositionLayerQuad wrist = { XR_TYPE_COMPOSITION_LAYER_QUAD };
     const bool haveWrist = AppendWristLayer(wrist);
-    const XrCompositionLayerBaseHeader* layers[5] = { (XrCompositionLayerBaseHeader*)&layer };
+    const XrCompositionLayerBaseHeader* layers[6] = { (XrCompositionLayerBaseHeader*)&layer };
     uint32_t nLayers = 1;
     if (haveQuad) layers[nLayers++] = (XrCompositionLayerBaseHeader*)&quad;
-    for (int s = 0; s < 2; s++) if (havePanel[s]) layers[nLayers++] = (XrCompositionLayerBaseHeader*)&panel[s];
+    for (int s = 0; s < 3; s++) if (havePanel[s]) layers[nLayers++] = (XrCompositionLayerBaseHeader*)&panel[s];
     if (haveWrist) layers[nLayers++] = (XrCompositionLayerBaseHeader*)&wrist;
     XrFrameEndInfo fei = { XR_TYPE_FRAME_END_INFO };
     fei.displayTime = g.frameState.predictedDisplayTime;
@@ -2511,7 +2511,7 @@ void XRSession::SaveLayers(const void* layersIn, unsigned count)
             pump.proj.views = pump.views;
             pump.haveLayers = true;
         }
-        else if (l->type == XR_TYPE_COMPOSITION_LAYER_QUAD && pump.nQuads < 4)
+        else if (l->type == XR_TYPE_COMPOSITION_LAYER_QUAD && pump.nQuads < 5)
             pump.quads[pump.nQuads++] = *(const XrCompositionLayerQuad*)l;
     }
 }
@@ -2524,7 +2524,7 @@ void XRSession::KeepAliveFrame(const void* fsIn)
 {
     const XrFrameState& fs = *(const XrFrameState*)fsIn;
     XrCompositionLayerProjection proj; XrCompositionLayerProjectionView views[kMaxEyes];
-    XrCompositionLayerQuad quads[4]; int nQuads = 0; bool have = false;
+    XrCompositionLayerQuad quads[5]; int nQuads = 0; bool have = false;
     {
         std::lock_guard<std::mutex> lk(pump.m);
         have = pump.haveLayers;
@@ -2545,7 +2545,7 @@ void XRSession::KeepAliveFrame(const void* fsIn)
         }
         pump.runFrames++;
     }
-    const XrCompositionLayerBaseHeader* layers[5]; uint32_t n = 0;
+    const XrCompositionLayerBaseHeader* layers[6]; uint32_t n = 0;
     if (have && fs.shouldRender)
     {
         layers[n++] = (const XrCompositionLayerBaseHeader*)&proj;
@@ -2766,7 +2766,7 @@ bool XRSession::Shutdown(bool processExit)
     ReleaseSnaps();
     for (Snap& s : m_Snap) s.valid = false;
     m_Frozen = -1;
-    for (int s = 0; s < 2; s++)
+    for (int s = 0; s < 3; s++)
     {
         DestroySwapchain(g.panelSwapchain[s]);
         g.panelImages[s].clear(); g.panelW[s] = g.panelH[s] = 0; m_Panel[s].alpha = 0;

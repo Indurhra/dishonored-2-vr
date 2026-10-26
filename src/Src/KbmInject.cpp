@@ -426,14 +426,14 @@ namespace
             if (on && !q.down && (pressed & q.bit)) { q.down = true; q.longSent = false; q.downAt = g_Now; }
             if (!q.down) continue;
             Slot send = kCount;
-            if (on && !q.longSent && g_Now - q.downAt >= g_QuickHold.load())
+            if (on && q.bit != kXRBtnX && !q.longSent && g_Now - q.downAt >= g_QuickHold.load())
             {
                 send = q.longSlot; q.longSent = true;
                 VRRuntime::Vibrate(0, 0.6f, 0.05f);
             }
             else if (!on)
             {
-                if (!q.longSent) send = q.shortSlot;
+                if (!q.longSent) send = q.bit == kXRBtnX && g_Now-q.downAt >= g_QuickHold.load() ? q.longSlot : q.shortSlot;
                 q.down = false;
             }
             if (send == kCount) continue;
@@ -774,6 +774,7 @@ void KbmInject::Tick()
     if (!g_Enabled.load()) { ReleaseAll(); return; }
     if (!VRRuntime::GetInput(in))
     {
+        Overlay::ControllerLost();
         if (g_HadInput) { if (g_NoInputSince < 0) g_NoInputSince = g_Now; else if (g_Now - g_NoInputSince > 0.3) InputLost(); }
         return;
     }
@@ -811,6 +812,7 @@ void KbmInject::Tick()
     }
     if (!inFront)
     {
+        Overlay::ControllerLost();
         if (!wasBehind) { wasBehind = true; playWhenLost = g_Mode == kModePlay && g_Simulating; unpauseUntil = -1; }
         ReleaseAll(); return;
     }
@@ -820,6 +822,13 @@ void KbmInject::Tick()
         if (playWhenLost && g_AutoFocus.load()) { unpauseFrom = g_Now + 0.4; unpauseUntil = g_Now + 2.5; }
     }
     { std::lock_guard lk(g_M); g_Stats.fgTicks++; }
+    if (Overlay::ControllerInput(in, g_Now))
+    {
+        ReleaseAll(); QuickReset(); SwordGesture::Reset(); SwordContact::Reset();
+        g_PendingStrike=-1; g_Latched=~0u; g_PrevBtn=0; g_StickLatch=true;
+        g_YawAccum=g_PitchAccum=0; g_HeadValid=false; g_ServoValid=false;
+        return;
+    }
     ReadMouseSettings();
 
     // Is the game actually simulating? The engine's player-camera aim update stops dead in the pause menu, in a

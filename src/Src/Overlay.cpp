@@ -1,5 +1,8 @@
 #include "pch.h"
+#include <algorithm>
+#include <cmath>
 #include "Overlay.h"
+#include "MenuHold.h"
 #include "GameInfo.h"
 #include "CVars.h"
 #include "XRProbe.h"
@@ -18,6 +21,10 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 
 namespace
 {
+    MenuHold g_MenuHold;
+    std::atomic<unsigned> g_Nav{0};
+    std::atomic<bool> g_ControllerFocus{false};
+    unsigned g_NavLatch=0;
     bool g_Init = false;
     std::atomic<bool> g_Visible{ false };
     HWND g_Hwnd = nullptr;
@@ -25,6 +32,10 @@ namespace
     ID3D11Device* g_Device = nullptr;
     ID3D11DeviceContext* g_Ctx = nullptr;
     ID3D11RenderTargetView* g_RTV = nullptr;
+    ID3D11Texture2D* g_MenuTex=nullptr;
+    ID3D11RenderTargetView* g_MenuRtv=nullptr;
+    ID3D11ShaderResourceView* g_MenuSrv=nullptr;
+    bool g_MenuReady=false;
     UINT g_W = 0, g_H = 0;
     double g_Fps = 0; LARGE_INTEGER g_LastT{}; int g_FrameCount = 0;
 
@@ -52,8 +63,8 @@ namespace
             ImGui_ImplWin32_WndProcHandler(h, m, w, l);
             switch (m)
             {
-            case WM_MOUSEMOVE: case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_RBUTTONDOWN: case WM_RBUTTONUP:
-            case WM_MBUTTONDOWN: case WM_MBUTTONUP: case WM_MOUSEWHEEL: case WM_KEYDOWN: case WM_KEYUP:
+            case WM_MOUSEMOVE: case WM_LBUTTONDOWN: case WM_RBUTTONDOWN:
+            case WM_MBUTTONDOWN: case WM_MOUSEWHEEL: case WM_KEYDOWN:
             case WM_CHAR: case WM_SYSKEYDOWN: case WM_SYSKEYUP: case WM_INPUT:
                 return 0; // swallow while the overlay owns input
             }
@@ -87,6 +98,7 @@ namespace
         g_Hwnd = sd.OutputWindow;
         ImGui::CreateContext();
         ImGui::GetIO().IniFilename = nullptr;
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_NavEnableKeyboard;
         ImGui_ImplWin32_Init(g_Hwnd);
         ImGui_ImplDX11_Init(g_Device, g_Ctx);
         LiveWheel::Prepare(g_Device);
@@ -99,8 +111,15 @@ namespace
 
     void DrawUI()
     {
-        ImGui::SetNextWindowSize(ImVec2(620, 520), ImGuiCond_FirstUseEver);
-        ImGui::Begin("DishonoredVR");
+        ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
+        if (g_ControllerFocus.exchange(false)) {
+            ImGui::SetNextWindowFocus();
+
+        }
+        ImGui::Begin("DishonoredVR", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+        ImGui::SetWindowFontScale(1.5f);
+        ImGui::TextUnformatted("Sticks: navigate | A: confirm | B: close | Hold X 3s: open");
         ImGui::Text("Exe %s (%s)  |  %ux%u  |  %.1f fps", GameInfo::Version().c_str(),
                     GameInfo::IsSupportedBuild() ? "supported" : "UNSUPPORTED build", g_W, g_H, g_Fps);
         ImGui::Text("OpenXR probe: %s", XRProbe::Summary().c_str());
@@ -219,11 +238,36 @@ void Overlay::OnPresent(IDXGISwapChain* sc)
             if (io.MousePos.x > -FLT_MAX) io.MousePos = ImVec2(io.MousePos.x * sx, io.MousePos.y * sy);
         }
     }
+    {
+        auto& io = ImGui::GetIO();
+        io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+        const unsigned nav = g_Visible ? g_Nav.load() : 0;
+        const ImGuiKey keys[] = {ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadDpadDown,
+            ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadFaceDown};
+        for(unsigned i=0;i<5;++i) io.AddKeyEvent(keys[i], (nav & (1u<<i))!=0);
+    }
+    const bool menu=g_Visible.load();
+    if(menu) {
+        auto& io=ImGui::GetIO();
+        if(io.MousePos.x>-FLT_MAX && g_W && g_H) io.MousePos=ImVec2(io.MousePos.x*1024/g_W,io.MousePos.y*768/g_H);
+        io.DisplaySize=ImVec2(1024,768);
+        if(!g_MenuTex) {
+            D3D11_TEXTURE2D_DESC d{};d.Width=1024;d.Height=768;d.MipLevels=d.ArraySize=1;
+            d.Format=DXGI_FORMAT_R8G8B8A8_UNORM;d.SampleDesc.Count=1;d.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
+            if(SUCCEEDED(g_Device->CreateTexture2D(&d,nullptr,&g_MenuTex))) {
+                g_Device->CreateRenderTargetView(g_MenuTex,nullptr,&g_MenuRtv);
+                g_Device->CreateShaderResourceView(g_MenuTex,nullptr,&g_MenuSrv);
+            }
+        }
+    }
     ImGui::NewFrame();
-    if (g_Visible) DrawUI();
-    if (reticle) Reticle::Draw();
+    if (menu) DrawUI();
+    if (reticle && !menu) Reticle::Draw();
     ImGui::Render();
-    g_Ctx->OMSetRenderTargets(1, &g_RTV, nullptr);
+    g_MenuReady=menu && g_MenuRtv && g_MenuSrv;
+    auto* target=g_MenuReady?g_MenuRtv:g_RTV;
+    if(g_MenuReady) { const float clear[4]={0,0,0,0};g_Ctx->ClearRenderTargetView(target,clear); }
+    g_Ctx->OMSetRenderTargets(1, &target, nullptr);
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 }
 
@@ -234,6 +278,10 @@ void Overlay::OnResize(IDXGISwapChain*)
 
 void Overlay::Shutdown()
 {
+    if(g_MenuSrv){g_MenuSrv->Release();g_MenuSrv=nullptr;}
+    if(g_MenuRtv){g_MenuRtv->Release();g_MenuRtv=nullptr;}
+    if(g_MenuTex){g_MenuTex->Release();g_MenuTex=nullptr;}
+    g_MenuReady=false;
     if (!g_Init) return;
     if (g_Hwnd && g_OrigWndProc) SetWindowLongPtrW(g_Hwnd, GWLP_WNDPROC, (LONG_PTR)g_OrigWndProc);
     ImGui_ImplDX11_Shutdown(); ImGui_ImplWin32_Shutdown(); ImGui::DestroyContext();
@@ -245,3 +293,37 @@ void Overlay::Shutdown()
 
 bool Overlay::Visible() { return g_Visible; }
 HWND Overlay::Window() { return g_Hwnd; }
+
+bool Overlay::ControllerInput(const XRInputState& in, double now)
+{
+    const bool wasVisible=g_Visible.load();
+    const int action=g_MenuHold.Tick(now,(in.buttons & kXRBtnX)!=0,(in.buttons & kXRBtnB)!=0,wasVisible);
+    if(action==1) {
+        g_Visible=true; g_ControllerFocus=true; g_NavLatch=in.buttons;
+        LOGI("Overlay: opened by X hold");
+    }
+    if(action==-1) { g_Visible=false; g_Nav=0; LOGI("Overlay: closed by B"); return true; }
+    g_NavLatch &= in.buttons;
+    unsigned nav=0;
+    if(g_Visible) {
+        const float x=fabsf(in.moveX)>fabsf(in.turnX)?in.moveX:in.turnX;
+        const float y=fabsf(in.moveY)>fabsf(in.turnY)?in.moveY:in.turnY;
+        if(fabsf(y)>=fabsf(x)) { if(y>0.55f) nav|=1; if(y< -0.55f) nav|=2; }
+        else { if(x< -0.55f) nav|=4; if(x>0.55f) nav|=8; }
+        if((in.buttons & ~g_NavLatch) & kXRBtnA) nav|=16;
+    }
+    g_Nav=nav;
+    return g_Visible.load();
+}
+void Overlay::ControllerLost() { g_MenuHold.Lost(); g_Nav=0; }
+
+void Overlay::Panel(XRSession& xr, float degrees, float distance)
+{
+    if(!Visible() || !g_MenuReady) return;
+    XRPanelLayer l; l.srv=g_MenuSrv;l.srcW=1024;l.srcH=768;l.crop[2]=1024;l.crop[3]=768;
+    l.premultiplied=true;l.alpha=1;l.headLocked=true;
+    // Match the menu setting, with a conservative angular cap to keep every edge visible.
+    const float size=std::clamp(degrees,30.f,62.f);
+    l.pos[2]=-distance;l.width=2*distance*tanf(size*0.5f*0.01745329252f);l.height=l.width*0.75f;
+    l.outW=1024;l.outH=768;xr.SetPanelLayer(2,l);
+}

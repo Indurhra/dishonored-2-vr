@@ -4,12 +4,17 @@
 
 //! ImGui debug overlay drawn onto the backbuffer right before Present.
 //! Toggle with INSERT. While visible, it takes over mouse/keyboard input.
+struct XRInputState;
+class XRSession;
 namespace Overlay
 {
     void OnPresent(IDXGISwapChain* sc);   //!< render thread
     void OnResize(IDXGISwapChain* sc);    //!< release RTV before ResizeBuffers
     void Shutdown();
     bool Visible();
+    bool ControllerInput(const XRInputState& input, double now);
+    void ControllerLost();
+    void Panel(XRSession& xr, float degrees, float distance);
     HWND Window();                        //!< the game's window (the swapchain's), null before the first Present
     //! The game window's CLIENT size in physical pixels (= the backbuffer the game renders to). A Quest eye is taller
     //! than it is wide and the render now covers its whole fov (vr fov auto), but Windows caps a window at the desktop,

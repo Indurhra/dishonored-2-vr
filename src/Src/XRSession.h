@@ -248,7 +248,7 @@ public:
     void SetWristLayer(const XRWristLayer& l) { m_Wrist = l; }
 
     //! A panel in the room (see XRPanelLayer), slot 0 or 1. Set per frame before the frame is submitted.
-    void SetPanelLayer(int slot, const XRPanelLayer& l) { if ((unsigned)slot < 2) m_Panel[slot] = l; }
+    void SetPanelLayer(int slot, const XRPanelLayer& l) { if ((unsigned)slot < 3) m_Panel[slot] = l; }
     //! The menu screen's frame (ScreenMode): instead of the game's picture across the eyes, the backdrop in the
     //! projection layer (each eye drawn for its pose right now) and panel slot 0 over it. Ends the frame.
     void SubmitScreen(const XRBackdrop& b);
@@ -270,7 +270,7 @@ public:
     void SetBackdropEyes(bool on) { m_BackdropEyes = on; }
     bool BackdropEyes() const { return m_BackdropEyes; }
     unsigned long long ScreenFrames() const { return m_ScreenFrames; }
-    unsigned long long PanelFrames(int slot) const { return (unsigned)slot < 2 ? m_PanelFrames[slot] : 0; }
+    unsigned long long PanelFrames(int slot) const { return (unsigned)slot < 3 ? m_PanelFrames[slot] : 0; }
     unsigned long long Snapshots() const { return m_Snapshots; }
     //! The left hand's pose this frame in the reference space (LOCAL): `space` 1 = the AIM pose as the runtime gives it
     //! (before ControllerPitchOffset), 0 = the grip pose (the aim pose stands in if the runtime has none). False if it
@@ -415,8 +415,8 @@ private:
     float m_WristPose[2][7] = {}; bool m_WristValid[2] = {};   //!< [0] grip, [1] raw aim (left hand)
     unsigned long long m_WristLayers = 0;
     bool AppendWristLayer(XrCompositionLayerQuad& quad);
-    XRPanelLayer m_Panel[2];                 //!< this frame's panels (SetPanelLayer)
-    unsigned long long m_PanelFrames[2] = {}, m_ScreenFrames = 0, m_Snapshots = 0;
+    XRPanelLayer m_Panel[3];                 //!< this frame's panels (SetPanelLayer)
+    unsigned long long m_PanelFrames[3] = {}, m_ScreenFrames = 0, m_Snapshots = 0;
     bool AppendPanelLayer(int slot, XrCompositionLayerQuad& quad);
     float m_FrameFade = 1.f;
     bool m_ResyncEyes = false;

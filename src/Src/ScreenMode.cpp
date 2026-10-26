@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Overlay.h"
 #include "ScreenMode.h"
 #include "XRSession.h"
 #include "KbmInject.h"
@@ -185,6 +186,7 @@ void ScreenMode::RequestRecenter(const char* why) { if (g_Flat.load()) { g_Recen
 bool ScreenMode::OnXrFrame(XRSession& xr, ID3D11Texture2D* bb, bool imageFlat, bool imageKnown)
 {
     std::lock_guard lk(g_M);
+    Overlay::Panel(xr, g_C.size, g_C.dist);
     const double now = Now();
     const float dt = g_Last > 0.0 ? (float)std::clamp(now - g_Last, 0.0, 0.1) : 0.f;
     g_Last = now;

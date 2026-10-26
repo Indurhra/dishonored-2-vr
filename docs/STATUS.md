@@ -410,3 +410,11 @@ The existing INSERT overlay now has a Rendering panel with synchronized stereo, 
 Validation: Release build and seven host checks pass, including overlapping mappings, context identity, overflow preservation, and stale-entry removal. Runtime reproduction of the headset-only failure, visual menu inspection, and perceptual clarity/performance comparison remain pending. This is a diagnostic candidate, not a confirmed blur fix.
 
 Next comparison: load the repaired Void quicksave, keep synchronized stereo and the same viewpoint, compare temporal AA on versus off while still and then moving. Record whether the safety warning reappears and collect heartbeat no-shadow/swap counters. Only then compare AER at the same scene; do not interpret engine Presents/s as complete stereo pairs/s.
+
+### 2026-10-26: controller-operated headset settings panel
+
+Hold X continuously for three seconds to open the mod panel. Either stick navigates, A activates/selects, and B closes the entire panel. Input gaps cancel pending holds; keeping X held after closing cannot reopen it. X quick-slot selection is deferred to release (short/long slot still uses QuickSlotHoldTime), preventing the old long-slot action firing before the menu opens. Gameplay input and gesture actions are released/suppressed while the panel owns controls, and buttons/sticks must return to neutral after closing. Key/button releases still pass the window hook to avoid stuck game actions.
+
+The panel is a dedicated 1024x768 OpenXR quad, centered in view space, using MenuScreenSize capped at 62 degrees and MenuScreenDistance. Content scrolls inside fixed bounds. A third panel slot and corresponding retained-layer capacity keep it separate from the native menu and weapon-wheel layers. Toolkit and trigger policy/settings are untouched. INSERT remains available.
+
+Release build and eight host checks pass, including hold duration, interruption, back-button edges and release-before-reopen. Headset visual fit, controller navigation and game interaction smoke testing remain unverified; no runtime launch was performed for this change.
