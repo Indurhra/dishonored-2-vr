@@ -60,3 +60,27 @@ src/Psvr2/PSVR2Toolkit-LICENSE and accompanies the installed helper. Bridge/IPC
 structure is adapted from the user's local re4-psvr2-plugin source, with new
 protocol magic, left-only commands and Dishonored policy. No RE4 gameplay hooks
 or REFramework dependency are included.
+
+## PSVR2 startup follow-up (2026-10-26)
+
+The first headset run identified SteamVR's real system string as
+`SteamVR/OpenXR : playstation_vr2`. The previous allowlist did not include this
+spelling, so the trigger helper stayed inactive. Added that exact spelling and
+its regression check; all five host tests pass. Installed DLL SHA256:
+3892986496198D2C868895716AF11EEAB95C8D98F547EF61A2F76BF9C0B743EC.
+After restart, the bridge reached status 2/result 0 and the game-thread observer
+recognized arkCpntPowerGrapple. Physical trigger feel is still pending testing.
+
+For the reported black screen and persistent OpenXR Toolkit screen, backed up
+HKCU SOFTWARE/OpenXR_Toolkit and copied RE4's per-app values to DishonoredVR,
+excluding its executable module path. RE4 remained unchanged. The copied profile
+includes first_run2=1, eye_tracking=1 and the existing RE4 VRS settings. Values
+were checked again after launch. The user confirmed they had closed the first
+session; its exit must not be attributed to a spontaneous trigger crash.
+SteamVR and the game were relaunched through Steam. The title screen rendered,
+and the user explicitly confirmed: "Picture visible; Toolkit gone".
+The exact cause of the initial black screen was not isolated by an A/B test.
+Copied eye-tracking/VRS values are configuration parity, not proof of active
+foveation: startup diagnostics still reported tracker_created=0, so no gaze-based
+performance benefit is claimed. Logs and registry backup are local under
+local/black-screen-20261026. Current wheel/artwork and all other mods are retained.

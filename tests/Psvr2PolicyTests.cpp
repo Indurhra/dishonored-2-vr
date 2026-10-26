@@ -6,6 +6,7 @@ using namespace dvrpsvr2;
 void check(bool b) { if(!b) {std::cerr<<"PSVR2 policy check failed\n";std::exit(1);} }
 int main() {
     check(Headset("SteamVR/OpenXR","PlayStation VR2"));
+    check(Headset("SteamVR/OpenXR","SteamVR/OpenXR : playstation_vr2"));
     check(!Headset("VirtualDesktopXR","Meta Quest 3"));
     check(!Headset("SteamVR/OpenXR","Meta Quest 3"));
     check(!Headset("SteamVR/OpenXR","Unknown"));

@@ -5,7 +5,8 @@
 namespace dvrpsvr2 {
 inline bool Headset(std::string_view runtime,std::string_view system) {
     return runtime.find("SteamVR")!=runtime.npos &&
-      (system.find("PlayStation VR2")!=system.npos || system.find("PSVR2")!=system.npos || system.find("PS VR2")!=system.npos);
+      (system.find("PlayStation VR2")!=system.npos || system.find("PSVR2")!=system.npos ||
+       system.find("PS VR2")!=system.npos || system.find("playstation_vr2")!=system.npos);
 }
 inline bool PowerClass(std::string_view name) {
     for(auto power:{"Bendtime","Blink","DarkVision","DevouringSwarm","Doppelganger","Grapple","Mesmerize","PhantasmalLink","Possession","ShadowWalk","Windblast"}) {
