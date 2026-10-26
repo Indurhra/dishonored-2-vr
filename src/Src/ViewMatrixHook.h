@@ -21,6 +21,8 @@ namespace ViewMatrixHook
     //! Head-aim mode: keep the game's view axis (it already follows the HMD via KbmInject)
     //! and only add the HMD positional offset.
     void SetKeepGameAxis(bool on);
+    //! Diagnostic: render normal-play yaw from the tracked VR target instead of the mouse servo.
+    void SetDirectTurn(bool on);
     //! Head-aim mode: hold the game eye's offset from the body axis fixed in the room (1, default) instead of letting it
     //! swing with the body's yaw (0, the old behaviour; measured as a 1.6 deg world shift over a 60 deg head turn).
     void SetPivotFix(bool on);

@@ -1120,6 +1120,7 @@ namespace
                      !m ? "" : StereoTaa::KeepTaaInStereo() ? "each eye its own TAA (StereoTaa)" : "TAA off in stereo (vr stereotaa 0)");
             }
             else if (what == "headaim") { int m = 1; ss >> m; KbmInject::SetHeadAim(m != 0); ViewMatrixHook::SetKeepGameAxis(m != 0); LOGI("cmd vr headaim {}", m); }
+            else if (what == "directturn") { int m = 1; ss >> m; ViewMatrixHook::SetDirectTurn(m != 0); }
             // 0 (default) = the controllers do not touch the game's menus; 1 = they do, the pre-2026-09-15 behaviour.
             else if (what == "auto") { int m = 1; ss >> m; g_Auto = m; LOGI("cmd vr auto {} (done {})", m, g_AutoDone); }
             else if (what == "turnspeed") { float d = 120; ss >> d; KbmInject::SetTurnSpeed(d); LOGI("cmd vr turnspeed {}", d); }

@@ -23,6 +23,7 @@ namespace
     std::atomic<bool> g_RecenterReq{ true };
     std::atomic<float> g_Scale{ 1.0f };
     std::atomic<bool> g_KeepGameAxis{ false };
+    std::atomic<bool> g_DirectTurn{ false };
     float g_RefPos[3] = {}; bool g_RefValid = false;
     std::mutex g_M; ViewMatrixHook::Stats g_Stats;
 
@@ -636,6 +637,21 @@ namespace
                         float hy = 0, hpt = 0; HmdAngles(head.valid ? head.quat : hp.quat, hy, hpt);
                         AxisFromAngles(atan2f(a[1], a[0]) * kR2D, Clampf(hpt, -kPitchLimit, kPitchLimit), 0.f, a);
                     }
+                    if (g_DirectTurn.load() && !g_AnimViewOn.load() && !KbmInject::Possessing())
+                    {
+                        // The mouse servo still steers the simulated body, but its quantised
+                        // correction must not become visible yaw. Both eyes reuse this axis
+                        // through g_Pair, so a turn cannot advance between a stereo pair.
+                        float off = 0;
+                        if (ps.head.valid && KbmInject::WorldYawOffset(off))
+                        {
+                            float hy = 0, pitch = 0;
+                            HmdAngles(ps.head.quat, hy, pitch);
+                            const float gamePitch = asinf(Clampf(a[2], -1.f, 1.f)) * kR2D;
+                            const float gameRoll = atan2f(a[5], a[8]) * kR2D;
+                            AxisFromAngles(off + hy, gamePitch, gameRoll, a);
+                        }
+                    }
                     float tmpAxis[9]; memcpy(tmpAxis, a, 36);
                     float q0[4] = { 0, 0, 0, 1 };
                     // In a small host the head's movement is scaled to the host: a rat's eye is 0.18 m off the floor
@@ -731,6 +747,7 @@ bool ViewMatrixHook::Enabled() { return g_Enabled; }
 void ViewMatrixHook::Recenter() { g_RecenterReq = true; }
 void ViewMatrixHook::SetWorldScale(float s) { g_Scale = s; }
 void ViewMatrixHook::SetKeepGameAxis(bool on) { g_KeepGameAxis = on; }
+void ViewMatrixHook::SetDirectTurn(bool on) { g_DirectTurn = on; LOGI("ViewMatrixHook: direct VR turn {}", on); }
 void ViewMatrixHook::SetPivotFix(bool on) { g_PivotFix = on; LOGI("ViewMatrixHook: eye pivot held in the room {} ({} frames so far)", on, g_PivotFixed.load()); }
 void ViewMatrixHook::SetAnimCam(int mode) { g_AnimCam = mode; }
 int ViewMatrixHook::AnimCam() { return g_AnimCam.load(); }
