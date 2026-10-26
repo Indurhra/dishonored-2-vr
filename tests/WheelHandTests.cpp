@@ -14,7 +14,7 @@ int main(){
         for(int slot=0;slot<8;++slot){
             float a=slot*2*WheelSelection::pi/8;
             float moved[3]={hand[0]+.02f*std::sin(a)*d.right[0],hand[1]+.02f*std::cos(a),hand[2]+.02f*std::sin(a)*d.right[2]};
-            check(d.Direction(moved,x,y) && WheelSelection::Pick(x,y,8,-1)==slot,"all hand directions select correctly at every opening yaw");
+            check(d.Direction(moved,x,y) && WheelSelection::Pick(x,y,8)==slot,"all hand directions select correctly at every opening yaw");
             check(d.center[0]==hand[0] && d.center[1]==hand[1] && d.center[2]==hand[2],"selection does not chase the hand");
         }
         float jitter[3]={hand[0],hand[1]+.001f,hand[2]};

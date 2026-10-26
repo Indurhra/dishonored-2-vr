@@ -29,7 +29,6 @@ namespace
     std::atomic<int> g_Selected{-1};
     std::atomic<int> g_Page{0};
     bool g_PageLatch=false;
-    WheelSelection::Sticky g_Sticky;
     std::atomic<unsigned> g_Generation{0};
     bool g_Held = false;
     std::atomic<bool> g_Ready{false};
@@ -225,7 +224,7 @@ bool LiveWheel::Input(const float hand[3],bool held,bool cancel,bool tracked,int
         std::lock_guard lk(g_M);
         g_Page=0; // Paging inputs are consumed, never change or clear this ring.
         if(g_PageLatch && x*x+y*y<.35f*.35f) g_PageLatch=false;
-        g_Selected=g_PageLatch ? -1 : g_Sticky.Update(x,y,(int)g_Items.size(),g_Selected.load(),GetTickCount64()*.001);
+        g_Selected=g_PageLatch ? -1 : WheelSelection::Pick(x,y,(int)g_Items.size());
     }
     if (g_Held && !held) g_Confirm=g_Ready.load();
     g_Held=held;
