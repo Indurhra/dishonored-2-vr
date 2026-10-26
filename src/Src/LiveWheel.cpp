@@ -29,7 +29,7 @@ namespace
     std::atomic<int> g_Selected{-1};
     std::atomic<int> g_Page{0};
     bool g_PageLatch=false;
-    constexpr int kPerPage=WheelModel::PerPage;
+    WheelSelection::Sticky g_Sticky;
     std::atomic<unsigned> g_Generation{0};
     bool g_Held = false;
     std::atomic<bool> g_Ready{false};
@@ -223,12 +223,9 @@ bool LiveWheel::Input(const float hand[3],bool held,bool cancel,bool tracked,int
     if (g_Cancel.load()) return true;
     {
         std::lock_guard lk(g_M);
-        const int pages=std::max(1,((int)g_Items.size()+kPerPage-1)/kPerPage);
-        if(pageDelta) { g_Page=(g_Page.load()+pageDelta+pages)%pages;g_Selected=-1;g_PageLatch=true; }
+        g_Page=0; // Paging inputs are consumed, never change or clear this ring.
         if(g_PageLatch && x*x+y*y<.35f*.35f) g_PageLatch=false;
-        const int start=g_Page.load()*kPerPage, count=std::min(kPerPage,(int)g_Items.size()-start);
-        const int local=g_PageLatch ? -1 : WheelSelection::Pick(x,y,count,g_Selected.load()-start);
-        g_Selected=local<0 ? -1 : start+local;
+        g_Selected=g_PageLatch ? -1 : g_Sticky.Update(x,y,(int)g_Items.size(),g_Selected.load(),GetTickCount64()*.001);
     }
     if (g_Held && !held) g_Confirm=g_Ready.load();
     g_Held=held;

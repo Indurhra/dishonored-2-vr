@@ -30,7 +30,6 @@ int wmain(int argc,wchar_t** argv)
     add("Grenade",4,4,"components/equipment/gadgets/regular_grenade.inventoryitem");
     add("Stun Mine",3,3,"components/equipment/gadgets/stun_mine.inventoryitem");
     add("Springrazor",3,3,"components/equipment/gadgets/springrazor.inventoryitem");
-    add("The Heart",-1,-1,"models/items/heart/heart.inventoryitem");
     add("Sticky Grenade",4,4,"components/equipment/gadgets/sticky_grenade.inventoryitem");
     add("Bend Time",-1,-1,"models/powers/bendtime/bendtime.inventoryitem");
     add("Blink",-1,-1,"models/powers/blink/blink.inventoryitem");
@@ -43,27 +42,27 @@ int wmain(int argc,wchar_t** argv)
     add("Possession",-1,-1,"models/powers/possession/possession.inventoryitem");
     add("Devouring Swarm",-1,-1,"models/powers/devouring_swarm/devouring_swarm.inventoryitem");
     add("Windblast",-1,-1,"models/powers/windblast/windblast.inventoryitem");
+    add("Explosive Bullet",10,10,"models/weapons/gun_player/gun_player.inventoryitem","components/equipment/ammo/bullet_explosive.inventoryitem");
+    add("Incendiary Bolt",5,5,"models/weapons/crossbow/crossbow_corvo.inventoryitem","components/equipment/ammo/bolt_incendiary.inventoryitem");
+    add("Stinging Bolt",5,5,"models/weapons/crossbow/crossbow_corvo.inventoryitem","components/equipment/ammo/bolt_burning_venom.inventoryitem");
+    add("Howling Bolt",5,5,"models/weapons/crossbow/crossbow_corvo.inventoryitem","components/equipment/ammo/bolt_flashbang.inventoryitem");
+    // Keep weapons/ammunition together, then powers. Fixture counts only.
+    std::rotate(items.begin()+7,items.end()-4,items.end());
     const auto render=[&](const wchar_t* filename,int page,int slot,int equipped)
     {
         ImGui_ImplDX11_NewFrame();ImGui::NewFrame();
-        const int count=std::min(WheelModel::PerPage,(int)items.size()-page*WheelModel::PerPage);
+        const int count=(int)items.size();
         const float angle=slot*2.f*WheelSelection::pi/count;
         const int local=slot<0?WheelSelection::Pick(0,0,count,-1):WheelSelection::Pick(std::sin(angle),std::cos(angle),count,-1);
-        renderer.Draw(items,page,local<0?-1:page*WheelModel::PerPage+local,equipped);
+        renderer.Draw(items,page,local<0?-1:local,equipped);
         ImGui::Render();ID3D11RenderTargetView* target=rtv.Get();ctx->OMSetRenderTargets(1,&target,nullptr);
-        const float clear[4]={};ctx->ClearRenderTargetView(target,clear);ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        const float clear[4]={0.045f,0.052f,0.065f,1.f};ctx->ClearRenderTargetView(target,clear);ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         if(!XRCapture::SaveTextureToPng(dev.Get(),ctx.Get(),tex.Get(),(out/filename).c_str())) return false;
         return true;
     };
-    bool ok=render(L"01-pistol.png",0,0,100);
-    ok=render(L"02-crossbow.png",0,1,100)&&ok;
-    ok=render(L"03-grenade.png",0,3,100)&&ok;
-    ok=render(L"04-far-reach.png",1,3,100)&&ok;
-    items[0].ammo=19;
-    ok=render(L"05-live-ammo.png",0,0,100)&&ok;
-    ok=render(L"06-neutral.png",0,-1,100)&&ok;
-    ok=render(L"07-last-page.png",2,2,100)&&ok;
+    bool ok=render(L"one-ring-selected.png",0,0,100);
+    ok=render(L"one-ring-neutral.png",0,-1,100)&&ok;
     ImGui_ImplDX11_Shutdown();ImGui::DestroyContext();
-    std::cout<<(ok?"Rendered seven states with the production wheel renderer. Fixture data, not a gameplay capture.\n":"Capture failed\n");
+    std::cout<<(ok?"Rendered two single-ring preview states with native assets. Fixture data, not a gameplay capture.\n":"Capture failed\n");
     return ok?0:7;
 }

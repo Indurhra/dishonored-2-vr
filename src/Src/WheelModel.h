@@ -6,7 +6,7 @@
 
 namespace WheelModel
 {
-    constexpr int PerPage=8;
+
     struct Item
     {
         int id=-1, ammo=-1, maxAmmo=-1;
@@ -57,7 +57,7 @@ namespace WheelModel
     // selection, so releasing a held direction cannot equip a replacement item.
     inline void Reconcile(const std::vector<Item>& oldItems,const std::vector<Item>& newItems,int& page,int& pick,bool& rearm)
     {
-        page=std::clamp(page,0,std::max(0,((int)newItems.size()-1)/PerPage));
+        page=0; // All available items share one ring.
         if(!SameOrder(oldItems,newItems)) { pick=-1;rearm=true; }
         if(pick>=(int)newItems.size()) pick=-1;
     }

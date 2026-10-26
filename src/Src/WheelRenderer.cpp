@@ -67,9 +67,7 @@ void WheelRenderer::Text(const std::string& value,ImVec2 centre,float size,ImU32
 void WheelRenderer::Draw(const std::vector<WheelModel::Item>& items,int page,int selected,int equippedId)
 {
     const ImVec2 centre(512,512);auto* dl=ImGui::GetForegroundDrawList();
-    const int pages=std::max(1,((int)items.size()+WheelModel::PerPage-1)/WheelModel::PerPage);
-    page=std::clamp(page,0,pages-1);
-    const int start=page*WheelModel::PerPage,n=std::min(WheelModel::PerPage,(int)items.size()-start);
+    const int start=0,n=(int)items.size();
     const auto ivory=IM_COL32(240,235,214,255),muted=IM_COL32(195,197,201,240);
     // Local translucent backing stops at the etched ring; no full-screen veil.
     dl->AddCircleFilled(centre,410.f,IM_COL32(12,14,18,105),128);
@@ -81,14 +79,15 @@ void WheelRenderer::Draw(const std::vector<WheelModel::Item>& items,int page,int
         const bool chosen=i==selected,equipped=item.id==equippedId;
         const float angle=slot*2.f*WheelSelection::pi/n;
         const ImVec2 p(512+350*std::sin(angle),512-350*std::cos(angle));
-        const float diameter=chosen?166.f:146.f;
+        const float base=n>1 ? std::min(146.f,0.86f*700.f*std::sin(WheelSelection::pi/n)) : 146.f;
+        const float diameter=base*(chosen ? 94.f/86.f : 1.f);
         Image(art.hero?119:121,p,ImVec2(diameter,diameter),IM_COL32(255,255,255,230));
         if(!Image(chosen?33:29,p,ImVec2(diameter,diameter),chosen?ivory:muted))
             dl->AddCircle(p,diameter*.5f,chosen?ivory:muted,64,chosen?3.f:1.f);
-        if(!Image(art.icon,ImVec2(p.x,p.y-4),ImVec2(chosen?108.f:94.f,chosen?108.f:94.f)))
+        if(!Image(art.icon,ImVec2(p.x,p.y-4),ImVec2(diameter*.64f,diameter*.64f)))
             Text(item.name,p,18,ivory,118);
-        if(item.ammo>=0) Text(std::to_string(item.ammo),ImVec2(p.x,p.y+52),20,item.ammo==0?IM_COL32(170,160,150,255):ivory);
-        if(equipped) dl->AddCircleFilled(ImVec2(p.x,p.y-88),3.5f,ivory,16);
+        if(item.ammo>=0) Text(std::to_string(item.ammo),ImVec2(p.x,p.y+base*.34f),std::max(12.f,base*.16f),item.ammo==0?IM_COL32(170,160,150,255):ivory);
+        if(equipped) dl->AddCircleFilled(ImVec2(p.x,p.y-diameter*.57f),3.5f,ivory,16);
         if(chosen)
         {
             dl->AddCircleFilled(p,diameter*.54f,IM_COL32(240,185,70,45),64);
@@ -106,15 +105,5 @@ void WheelRenderer::Draw(const std::vector<WheelModel::Item>& items,int page,int
         Text(item.name,ImVec2(512,594),30,ivory,310);
         if(item.ammo>=0)
             Text(std::to_string(item.ammo)+" / "+std::to_string(item.maxAmmo),ImVec2(512,642),20,muted);
-    }
-    if(pages>1)
-    {
-        Text("Page "+std::to_string(page+1)+" / "+std::to_string(pages),ImVec2(512,700),24,ivory);
-        Text("Left trigger: next page",ImVec2(512,740),20,muted);
-        for(int i=0;i<pages;++i)
-        {
-            const ImVec2 p(512+(i-(pages-1)*.5f)*22,770);
-            if(i==page) dl->AddCircleFilled(p,3.5f,ivory,16);else dl->AddCircle(p,3.f,muted,16,1.f);
-        }
     }
 }

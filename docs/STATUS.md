@@ -432,3 +432,11 @@ The candidate logs the first eight missing bound view buffers, their context/siz
 Validation: Release build and all eight host checks pass, with added arm-shortening, extension-bound and invalid-measurement cases. Simulator captures and logs are under local/aer-hand-wheel (not shipped). PSVR2 trigger policy/helper and Toolkit settings were not changed.
 
 Final simulator check: AER with smooth 20-degree head sway at a simulated 90 Hz recorded 9,663 TAA/frame-order agreements, zero disagreements and zero missing shadows; this does not measure headset motion clarity. The equipped palm's logged offset from its tracked anchor settled to zero. Holding X opened panel slot 2 at 1024x768. The new context diagnostic also observed later function changes during video startup in the healthy simulator; their presence alone is not evidence of the headset fault. The user chose to continue without the physical headset.
+
+### 2026-10-26: single-ring wheel installed candidate
+
+All currently available native inventory entries now share one ring; there is no eight-item page limit. Icon size follows item count to keep adjacent icons apart, retaining the central item name/art/ammunition and gold selected-item highlight. Live item/count reconciliation remains active. The former paging buttons no longer change or clear the ring; trigger input remains consumed while the wheel is open.
+
+Neighbour selection uses an angular margin of 30% of a sector (capped at 0.10 radians), followed by 80 ms of continuous intent before switching. Returning to centre clears immediately and the first selection is immediate. Reversing direction resets the pending switch. For 22 items the angular margin is about 4.9 degrees beyond the sector boundary. This is selection hysteresis, not a change to PSVR2 trigger resistance.
+
+Validation: Release DLL and standalone production renderer built. Visually checked the 22-item native-asset render. All eight host checks pass, including neighbour reachability at 22/24/64 items, short jitter, interrupted dwell, centre cancellation and wraparound. User will test physical controller feel; no headset validation is claimed.
