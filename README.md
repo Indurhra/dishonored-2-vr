@@ -1,3 +1,5 @@
+> This is an unofficial fork of **The Cosmic Tangerine’s [Dishonored 2 VR mod](https://github.com/thecosmictangerine-cloud/dishonored-2-vr)**. Original mod by **The Cosmic Tangerine**; additional modifications and installer maintained by **Indurhra**.
+
 > **Indurhra development fork:** Contains the controller weapon wheel, hand calibration,
 > controller-operated VR menu, rendering diagnostics/fixes, story Heart repair, and
 > left-only PSVR2 adaptive triggers developed from Cosmic Tangerine's mod.
