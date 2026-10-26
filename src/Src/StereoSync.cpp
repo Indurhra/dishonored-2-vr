@@ -6,6 +6,7 @@
 #include "KbmInject.h"
 #include "ScreenMode.h"
 #include "LiveWheel.h"
+#include "VRRuntime.h"
 #include <detours/detours.h>
 #include <algorithm>
 
@@ -43,8 +44,21 @@ namespace
     void UpdateFrameLimit()
     {
         if (!CVars::Available()) return;
-        const int requested = g_SyncOn.load() ? g_LimitRequested.load() : 0;
-        if (requested == g_LastLimitRequest) return;
+        const int requested = g_SyncOn.load() && VRRuntime::GetStatus().running ? g_LimitRequested.load() : 0;
+        if (requested == g_LastLimitRequest) {
+            // Loading and the visual-settings UI can replace the numeric value.
+            // The explicit VR cap owns it while synchronised stereo is active.
+            // Remember the replacement so leaving stereo restores the user's choice.
+            if (requested && g_LimitOwned) {
+                const float current = CVars::GetFloat("com_timeScaler", -1.f);
+                if (current > 0.f && current != g_AppliedLimit) {
+                    g_SavedLimit = current;
+                    CVars::SetFloat("com_timeScaler", g_AppliedLimit);
+                    LOGI("StereoSync: engine limiter reset to {} FPS; reapplied configured VR cap {} FPS", current * 30.f, requested);
+                }
+            }
+            return;
+        }
         // Only undo our own value. A change made through the game's options belongs to the player.
         if (g_LimitOwned && CVars::GetFloat("com_timeScaler", -1.f) == g_AppliedLimit)
             CVars::SetFloat("com_timeScaler", g_SavedLimit);
@@ -340,7 +354,7 @@ std::string StereoSync::Status()
     for (int i = 1; i < wCount; i++) gate += fmt::format(" {} {}", kGateNames[i], g_GateShut[i].load());
     for (int i = 0; i < xCount; i++) exp += fmt::format(" {} {}", kExpNames[i], g_Expired[i].load());
     std::string ui; { std::lock_guard lk(g_UiM); ui = fmt::format("uistack {} {} changes {}", g_UiStack.load() ? 1 : 0, g_UiShape, g_UiChanges); }
-    return fmt::format("stereosync {} | ", ui) +
+    return fmt::format("stereosync {} | engine_limit current {:.1f} requested {} owned {} | ", ui, CVars::GetFloat("com_timeScaler", 0.f)*30.f, g_LimitRequested.load(), g_LimitOwned) +
            fmt::format("stereosync on {} lefts {} rights {} held {} | gate {} (open {}{}) | not held:{} | input reads {} waited {} | frames {} simulated {}{}",
                        g_SyncOn.load() ? 1 : 0, g_Lefts.load(), g_Rights.load(), g_SyncHeld.load(), kGateNames[g_GateWhy.load()], g_GateShut[0].load(), gate, exp,
                        g_Polls.load(), g_PollsHeld.load(), g_Calls.load(), g_Ticks.load(), g_Dbg.load() ? fmt::format(" | syncdbg {}", g_Dbg.load()) : std::string());

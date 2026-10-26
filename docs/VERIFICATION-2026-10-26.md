@@ -170,3 +170,50 @@ Release build and all eight host checks pass. Trigger/haptic policy, body settin
 and Toolkit settings are unchanged. Simulator overrides are removed after testing;
 saves and game config were verified byte-for-byte unchanged and left untouched.
 Simulator-altered hand calibration was restored after backing up the current files.
+
+## Half-rate lock investigation (19:10 headset session / 19:30 simulator)
+
+The headset session after the graphics-hook repair has zero missing view shadows,
+no eye-phase disagreement and no TAA fallback, yet native stereo still submits at
+half rate. SteamVR's steam.app.403640 profile has motionSmoothingOverride=2 and no
+framesToThrottle setting. Toolkit's DishonoredVR profile has no explicit frame
+limiter value. The recorded longest xrWaitFrame is below 0.005 s, so the old logs
+do not support assuming xrWaitFrame is where the persistent wait happens.
+
+Inspected existing IDA decompilation and fresh executable disassembly: the graphics
+frame path at RVA 0x359240 loads com_timeScaler's numeric float and calls the
+spin/yield limiter at 0x462E0. The settings UI maps the scale to 30 * scale FPS.
+Our prior override wrote 240 FPS once, before save loading, then returned forever
+while the requested setting stayed unchanged. It could not recover a later reset.
+The user's archived scale is 3 (90 FPS); its actual runtime value during the
+headset lock was NOT recorded. This is a candidate cause, not a proven diagnosis
+of that headset session.
+
+Changes: enforce the explicit StereoFrameLimit during a running synchronized VR
+session; detect a replacement value and preserve it for restoration when leaving
+that mode. Disable desktop Present sync intervals only while XR is running,
+following the separation of desktop/headset pacing used in the D1 reference.
+Desktop flags and flat-game presentation are unchanged. Actual requested desktop
+sync was already 0 in the simulator; no gain is attributed to that safeguard.
+
+Added bounded-window wall-clock measurements for xrWaitFrame, xrBeginFrame,
+xrEndFrame, swapchain acquisition/wait, the real desktop Present, and time outside
+Present. These are not GPU timings and worker-thread waits can overlap rendering.
+Heartbeat snapshots reset each second and every fifth snapshot is retained in the
+log. Current engine cap and ownership are reported alongside the samples. These
+will distinguish engine/driver waits from runtime begin/end waits; xrBeginFrame
+still occurs after engine drawing, a separate scheduling concern not changed here.
+See https://github.com/KhronosGroup/OpenXR-Guide/blob/main/chapters/frame_submission.md.
+
+Simulator regression at 3076x3140 eyes, engine 2873x3741, latest save:
+- Deliberately configured 90 engine FPS: exactly 45 stereo FPS, xrWait ~0.001 ms,
+  outside Present ~10.44 ms, desktop Present ~0.097 ms.
+- Restored 240 target and injected com_timeScaler=3: detected/reapplied 240 next
+  Present; approximately 155 engine / 77.7 stereo FPS, outside Present ~3.47 ms.
+- Switching to AER restores the replacement game limit (scale 3 / 90 FPS).
+- All eight host checks pass; Release build succeeds.
+
+Evidence and current-install backup: local/half-rate/. This reproduces and fixes
+one mechanism giving precisely the reported lock. Actual SteamVR lock removal
+requires a headset run; simulator results do not establish 90 FPS in this newer
+scene. No trigger, body, lens-effect, resolution or SteamVR-setting changes.

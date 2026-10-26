@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "D3D11Hook.h"
 #include "RenderRes.h"
+#include "VRRuntime.h"
+#include "WaitTrace.h"
 #include <detours/detours.h>
 
 namespace
@@ -14,12 +16,25 @@ namespace
 
     HRESULT STDMETHODCALLTYPE HkPresent(IDXGISwapChain* sc, UINT sync, UINT flags)
     {
-        if (!(flags & DXGI_PRESENT_TEST) && g_Cb.onPresent)
-        {
-            // Guard against re-entrancy (nested presents from our own work).
-            if (!g_InPresent.exchange(true)) { g_Cb.onPresent(sc); g_InPresent = false; }
+        if ((flags & DXGI_PRESENT_TEST) || g_InPresent.exchange(true))
+            return g_RealPresent(sc, sync, flags);
+        static double previousReturn=0;
+        const double entered=WaitTrace::Now();
+        if(previousReturn) WaitTrace::Add(WaitTrace::EngineGap,entered-previousReturn);
+        if(g_Cb.onPresent) g_Cb.onPresent(sc);
+        // The desktop is only a mirror in VR. Its refresh must not pace each
+        // eye separately. Do not change flags or flat-game presentation.
+        const bool vr=VRRuntime::GetStatus().running;
+        static int lastSync=-1;
+        if(lastSync!=(int)sync) {
+            LOGI("D3D11Hook: desktop sync interval requested {} effective {} (VR {})",sync,vr?0:sync,vr);
+            lastSync=(int)sync;
         }
-        return g_RealPresent(sc, sync, flags);
+        HRESULT result;
+        { WaitTrace::Scope timing(WaitTrace::DesktopPresent); result=g_RealPresent(sc,vr?0:sync,flags); }
+        previousReturn=WaitTrace::Now();
+        g_InPresent=false;
+        return result;
     }
     HRESULT STDMETHODCALLTYPE HkResize(IDXGISwapChain* sc, UINT n, UINT w, UINT h, DXGI_FORMAT f, UINT flags)
     {

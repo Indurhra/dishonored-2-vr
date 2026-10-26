@@ -11,6 +11,7 @@
 #include "MetaAsw.h"
 #include "SysInfo.h"
 #include "Watchdog.h"
+#include "WaitTrace.h"
 #include <cmath>
 #include <chrono>
 #include <condition_variable>
@@ -129,14 +130,14 @@ bool AcquireWaitImage(XrSwapchain sc, uint32_t& index)
     if (!w.pending)
     {
         XrSwapchainImageAcquireInfo ai = { XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
-        Watchdog::Mark mk("xrAcquireSwapchainImage");
+        Watchdog::Mark mk("xrAcquireSwapchainImage"); WaitTrace::Scope timing(WaitTrace::AcquireImage);
         if (XR_FAILED(xrAcquireSwapchainImage(sc, &ai, &w.index))) return false;
         w.pending = true;
     }
     XrSwapchainImageWaitInfo wi = { XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
     wi.timeout = 100000000;   // 100 ms
     XrResult r;
-    { Watchdog::Mark mk("xrWaitSwapchainImage"); r = xrWaitSwapchainImage(sc, &wi); }
+    { Watchdog::Mark mk("xrWaitSwapchainImage"); WaitTrace::Scope timing(WaitTrace::WaitImage); r = xrWaitSwapchainImage(sc, &wi); }
     if (r != XR_SUCCESS)
     {
         if (pump.imageTimeouts++ < 8) LOGI("XRSession: a swapchain image was not free after 100 ms ({}): this frame keeps its last one", (int)r);
@@ -1517,7 +1518,7 @@ bool XRSession::BeginFrame()
         g.frameState = { XR_TYPE_FRAME_STATE };
         XrFrameWaitInfo fwi = { XR_TYPE_FRAME_WAIT_INFO };
         XrResult wr;
-        { Watchdog::Mark mk("xrWaitFrame"); wr = xrWaitFrame(g.session, &fwi, &g.frameState); }
+        { Watchdog::Mark mk("xrWaitFrame"); WaitTrace::Scope timing(WaitTrace::WaitFrame); wr = xrWaitFrame(g.session, &fwi, &g.frameState); }
         if (XR_FAILED(wr))
             return false;
         recenterPending = m_RecenterPending; recenterAt = m_RecenterAt;
@@ -1525,7 +1526,7 @@ bool XRSession::BeginFrame()
 
     XrFrameBeginInfo fbi = { XR_TYPE_FRAME_BEGIN_INFO };
     XrResult r;
-    { Watchdog::Mark mk("xrBeginFrame"); r = xrBeginFrame(g.session, &fbi); }
+    { Watchdog::Mark mk("xrBeginFrame"); WaitTrace::Scope timing(WaitTrace::BeginFrame); r = xrBeginFrame(g.session, &fbi); }
     if (XR_FAILED(r))
     {
         FrameEnded();
@@ -2174,7 +2175,7 @@ void XRSession::EndFrameWithLayers(XrCompositionLayerProjection& layer)
     fei.layers = layers;
     SaveLayers(layers, haveWrist ? nLayers - 1 : nLayers);   // the keep-alive's copy (the watch, last, left out)
     XrResult er;
-    { Watchdog::Mark mk("xrEndFrame"); er = xrEndFrame(g.session, &fei); }
+    { Watchdog::Mark mk("xrEndFrame"); WaitTrace::Scope timing(WaitTrace::EndFrame); er = xrEndFrame(g.session, &fei); }
     if (XR_FAILED(er) && m_EndFrameFails++ < 10)   // the runtime refused the frame: a black headset, said nowhere else
         LOGI("XRSession: xrEndFrame FAILED {} ({} layers{})", (int)er, nLayers, m_EndFrameFails == 10 ? "; not logged again" : "");
 
@@ -2493,7 +2494,7 @@ void XRSession::EndFrameNoRender()
     fei.layerCount = 0;
     fei.layers = nullptr;
     XrResult er;
-    { Watchdog::Mark mk("xrEndFrame"); er = xrEndFrame(g.session, &fei); }
+    { Watchdog::Mark mk("xrEndFrame"); WaitTrace::Scope timing(WaitTrace::EndFrame); er = xrEndFrame(g.session, &fei); }
     if (XR_FAILED(er) && m_EndFrameFails++ < 10)
         LOGI("XRSession: xrEndFrame (no layers) FAILED {}{}", (int)er, m_EndFrameFails == 10 ? "; not logged again" : "");
     m_FrameStarted = false;
@@ -2679,7 +2680,7 @@ void XRSession::PumpLoop()
             XrFrameWaitInfo wi = { XR_TYPE_FRAME_WAIT_INFO };
             const double t0 = NowSec();
             XrResult r;
-            { Watchdog::Mark mk("xrWaitFrame"); r = xrWaitFrame(g.session, &wi, &st); }
+            { Watchdog::Mark mk("xrWaitFrame"); WaitTrace::Scope timing(WaitTrace::WaitFrame); r = xrWaitFrame(g.session, &wi, &st); }
             const double t1 = NowSec(), took = t1 - t0;
             lk.lock();
             pump.waiting = false; pump.waits++;

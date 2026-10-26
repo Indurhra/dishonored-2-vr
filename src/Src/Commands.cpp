@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Commands.h"
 #include "Watchdog.h"
+#include "WaitTrace.h"
 #include "GameInfo.h"
 #include "CVars.h"
 #include "VRRuntime.h"
@@ -1161,6 +1162,10 @@ namespace
         f << ScreenMode::Status() << "\n";
         f << Watchdog::Status() << "\n";
         f << VRRuntime::PumpStatus() << "\n";
+        const auto waits=WaitTrace::Snapshot();
+        f << waits << "\n";
+        static unsigned waitLog=0;
+        if(++waitLog%5==0) LOGI("{} | {}",waits,StereoSync::Status());
         float o[3], a[9];
         if (Game::PlayerView(o, a))
         {
