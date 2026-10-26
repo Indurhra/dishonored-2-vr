@@ -6,6 +6,7 @@
 #include "KbmInject.h"
 #include "ScreenMode.h"
 #include <detours/detours.h>
+#include <algorithm>
 
 namespace
 {
@@ -34,6 +35,29 @@ namespace
     std::atomic<bool> g_PollsHooked{ false };
     std::atomic<unsigned long long> g_Calls{ 0 };
     std::atomic<bool> g_SyncOn{ false }, g_PendingRight{ false };
+    std::atomic<int> g_LimitRequested{ 0 }; // engine frames/s; two eye renders per stereo pair
+    int g_LastLimitRequest = -1;
+    float g_SavedLimit = 0.f, g_AppliedLimit = 0.f;
+    bool g_LimitOwned = false;
+    void UpdateFrameLimit()
+    {
+        if (!CVars::Available()) return;
+        const int requested = g_SyncOn.load() ? g_LimitRequested.load() : 0;
+        if (requested == g_LastLimitRequest) return;
+        // Only undo our own value. A change made through the game's options belongs to the player.
+        if (g_LimitOwned && CVars::GetFloat("com_timeScaler", -1.f) == g_AppliedLimit)
+            CVars::SetFloat("com_timeScaler", g_SavedLimit);
+        g_LimitOwned = false;
+        g_LastLimitRequest = requested;
+        if (!requested || !CVars::Address("com_timeScaler")) return;
+        g_SavedLimit = CVars::GetFloat("com_timeScaler", 0.f);
+        if (!(g_SavedLimit > 0.f)) return;
+        // Verified in 1.77.9.0: visual-settings limiter = 30 * com_timeScaler.
+        // Numeric slots only: do not change the archived string or call writeConfig.
+        g_AppliedLimit = requested / 30.f;
+        g_LimitOwned = CVars::SetFloat("com_timeScaler", g_AppliedLimit);
+        LOGI("StereoSync: engine frame limit {} -> {} frames/s (two frames per stereo pair)", g_SavedLimit * 30.f, requested);
+    }
     std::atomic<int> g_Dbg{ 0 };   // vr syncdbg <mask> (A/B and tests): 64 input read on held frames (as before the read hooks),
                                    // 256 no left image staged (VRRuntime: tests the stereo health check), 512 the gate ignored (holds in menus too, as before)
 
@@ -258,6 +282,7 @@ void StereoSync::Install()
 
 void StereoSync::OnPresent()
 {
+    UpdateFrameLimit();
     UiStackTick();
     {   // the gate for the next frames (see PairHold)
         const unsigned long long np = ++g_Presents;
@@ -294,6 +319,7 @@ void StereoSync::OnPresent()
 bool StereoSync::Command(const std::string& what, std::istringstream& ss)
 {
     if (what == "uistack") { int m = 1; ss >> m; g_UiStack = m != 0; { std::lock_guard lk(g_UiM); g_UiShape = "?"; } LOGI("cmd vr uistack {}", m); return true; }
+    if (what == "stereolimit") { int fps = 0; ss >> fps; g_LimitRequested = fps > 0 ? std::clamp(fps, 30, 300) : 0; LOGI("StereoSync: requested stereo engine frame limit {}", g_LimitRequested.load()); return true; }
     if (what == "syncdbg") { int m = 0; ss >> m; g_Dbg = m; LOGI("cmd vr syncdbg {}", m); return true; }
     if (what == "simlog")
     {
