@@ -5,6 +5,7 @@
 #include "Game.h"
 #include "VRRuntime.h"
 #include "KbmInject.h"
+#include "XRCapture.h"
 #include <detours/detours.h>
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -41,6 +42,8 @@ namespace
     unsigned g_ReferenceGen=0;
     float g_Pos[3]={}, g_Quat[4]={0,0,0,1};
     constexpr unsigned kSize=1024;
+    std::atomic<bool> g_Shot{false};
+    std::string g_ShotTag;
 
     template<class T> T Fn(uintptr_t rva) { return reinterpret_cast<T>(GameInfo::Base()+rva); }
     int Token(void* self) { return *reinterpret_cast<int*>(static_cast<char*>(self)+232); }
@@ -202,7 +205,8 @@ bool LiveWheel::Render(ID3D11Device* dev,ID3D11DeviceContext* ctx)
     }
     ImGui_ImplDX11_NewFrame(); ImGui_ImplWin32_NewFrame(); ImGui::GetIO().DisplaySize=ImVec2(kSize,kSize); ImGui::NewFrame();
     auto* dl=ImGui::GetForegroundDrawList(); const ImVec2 centre(512,512);
-    dl->AddCircleFilled(centre,498,IM_COL32(12,16,22,225),96);
+    // A standalone ring: no full disc, native veil, or controls-bar artwork.
+    dl->AddCircle(centre,350,IM_COL32(190,205,215,125),96,2.f);
     std::vector<Item> items; { std::lock_guard lk(g_M); items=g_Items; }
     const int pick=g_Selected.load(), start=g_Page.load()*kPerPage;
     const int n=std::min(kPerPage,(int)items.size()-start);
@@ -223,13 +227,21 @@ bool LiveWheel::Render(ID3D11Device* dev,ID3D11DeviceContext* ctx)
     const char* label=pick>=0 && pick<(int)items.size() ? items[pick].name.c_str() : "Cancel";
     const ImVec2 text=ImGui::GetFont()->CalcTextSizeA(28,1000,280,label);
     dl->AddText(nullptr,28,ImVec2(512-text.x*.5f,460),IM_COL32(255,255,255,255),label,nullptr,280);
-    dl->AddText(nullptr,20,ImVec2(330,530),IM_COL32(205,215,225,255),"Stick: select   Release: confirm");
-    dl->AddText(nullptr,20,ImVec2(340,562),IM_COL32(205,215,225,255),"Centre or B: cancel");
-    const auto page=fmt::format("X: previous   {}/{}   Y: next",g_Page.load()+1,std::max(1,((int)items.size()+kPerPage-1)/kPerPage));
-    dl->AddText(nullptr,20,ImVec2(315,595),IM_COL32(205,215,225,255),page.c_str());
-    dl->AddText(nullptr,20,ImVec2(330,628),IM_COL32(205,215,225,255),"A: mana   Left stick click: health");
+    const int pages=std::max(1,((int)items.size()+kPerPage-1)/kPerPage);
+    if (pages>1)
+    {
+        const auto page=fmt::format("{} / {}",g_Page.load()+1,pages);
+        const auto size=ImGui::GetFont()->CalcTextSizeA(20,1000,0,page.c_str());
+        dl->AddText(nullptr,20,ImVec2(512-size.x*.5f,520),IM_COL32(205,215,225,255),page.c_str());
+    }
     ImGui::Render(); const float clear[4]={}; ctx->OMSetRenderTargets(1,&g_Rtv,nullptr); ctx->ClearRenderTargetView(g_Rtv,clear);
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData()); g_Ready=true;
+    if (g_Shot.exchange(false))
+    {
+        std::string tag; { std::lock_guard lk(g_M); tag=g_ShotTag; }
+        const auto path=GameInfo::GameDir()+L"\\DVR_"+std::wstring(tag.begin(),tag.end())+L"_wheel.png";
+        LOGI("LiveWheel: overlay PNG {}",XRCapture::SaveTextureToPng(dev,ctx,g_Tex,path.c_str()) ? "saved" : "FAILED");
+    }
     return true;
 }
 ID3D11ShaderResourceView* LiveWheel::Texture() { return Active() && g_Ready ? g_Srv : nullptr; }
@@ -256,6 +268,13 @@ bool LiveWheel::PanelPose(float pos[3],float quat[4])
 }
 bool LiveWheel::Command(const std::string& what,std::istringstream& ss)
 {
+    if (what=="wheelshot")
+    {
+        std::string tag="overlay"; ss>>tag;
+        if (tag.empty() || tag.size()>64 || tag.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=std::string::npos) return true;
+        { std::lock_guard lk(g_M); g_ShotTag=tag; }
+        g_Shot=true; return true;
+    }
     if (what=="livewheelcancel") { Cancel(); return true; }
     if (what!="livewheel") return false;
     int on=0;ss>>on;

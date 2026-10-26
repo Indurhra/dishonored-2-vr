@@ -230,7 +230,7 @@ bool ScreenMode::OnXrFrame(XRSession& xr, ID3D11Texture2D* bb, bool imageFlat, b
     ID3D11ShaderResourceView* wsrv = WristHud::Texture(wtw, wth, &wgamma);
     g_Flat = g_Kind == kScreen;
     g_Wheel = g_Kind == kWheel;
-    g_Lift = ((g_Kind == kWheel && g_C.wheel != 0) ||
+    g_Lift = ((g_Kind == kWheel && (g_C.wheel != 0 || LiveWheel::Active())) ||
               (g_Kind == kPlay && g_C.stereoHud != 0 && VRRuntime::Stereo())) && wsrv && wtw && wth;
 
     // ---- what this frame shows ----
@@ -339,13 +339,16 @@ bool ScreenMode::OnXrFrame(XRSession& xr, ID3D11Texture2D* bb, bool imageFlat, b
         Centre(g_WheelAt, l.pos);
         l.outW = (unsigned)std::clamp(std::min((float)wtw, g_C.wheelSize * g_C.density), 256.f, 4096.f);
         l.outH = (unsigned)std::clamp(l.outW / aspect, 144.f, 4096.f);
-        if (auto* nativeInventory = LiveWheel::Texture())
+        if (LiveWheel::Active())
         {
+            auto* nativeInventory = LiveWheel::Texture();
+            // Never flash the original full-screen UI while our texture/pose
+            // is still being prepared. It contains the veil and controls bar.
+            if (!nativeInventory || !LiveWheel::PanelPose(l.pos,l.quat)) return false;
             l.srv = nativeInventory; l.srcW = l.srcH = 1024;
             l.crop[0] = l.crop[1] = 0; l.crop[2] = l.crop[3] = 1024;
             l.gamma = false; l.soft = 0; l.width = l.height = .75f;
             l.outW = l.outH = 1024;
-            LiveWheel::PanelPose(l.pos, l.quat);
         }
         xr.SetPanelLayer(1, l);
         g_S.wheelPanels++;
