@@ -7,6 +7,9 @@
 #include "Reticle.h"
 #include "LiveWheel.h"
 #include "RenderRes.h"
+#include "Commands.h"
+#include "StereoSync.h"
+#include "StereoTaa.h"
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
@@ -97,7 +100,7 @@ namespace
     void DrawUI()
     {
         ImGui::SetNextWindowSize(ImVec2(620, 520), ImGuiCond_FirstUseEver);
-        ImGui::Begin("DishonoredVR - stage 0");
+        ImGui::Begin("DishonoredVR");
         ImGui::Text("Exe %s (%s)  |  %ux%u  |  %.1f fps", GameInfo::Version().c_str(),
                     GameInfo::IsSupportedBuild() ? "supported" : "UNSUPPORTED build", g_W, g_H, g_Fps);
         ImGui::Text("OpenXR probe: %s", XRProbe::Summary().c_str());
@@ -110,6 +113,22 @@ namespace
                 ImGui::Text("XR session: not running (%s)", st.error.c_str());
         }
         ImGui::Separator();
+        if (ImGui::CollapsingHeader("Rendering", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            int mode = StereoSync::Active() ? 1 : VRRuntime::Stereo() ? 2 : 0;
+            if (ImGui::Combo("Stereo mode", &mode, "Mono (no depth)\0Synchronized stereo\0Alternating eyes (AER)\0"))
+                Commands::Queue(fmt::format("vr stereo {}", mode == 1 ? 2 : mode == 2 ? 1 : 0));
+            ImGui::TextWrapped("Synchronized: both eyes see the same moment. AER: one new eye per game frame; moving objects can appear doubled.");
+            int aa = StereoTaa::Mode() == 0 ? 0 : 1;
+            if (ImGui::Combo("Stereo anti-aliasing", &aa, "Off (clarity comparison)\0Per-eye temporal AA\0"))
+                Commands::Queue(fmt::format("vr stereotaa {}", aa));
+            if (StereoTaa::FellBack())
+            {
+                ImGui::TextWrapped("Temporal AA disabled by safety check: eye identification failed.");
+                if (ImGui::Button("Retry per-eye AA")) Commands::Queue("vr stereotaa 1");
+            }
+            ImGui::TextWrapped("Compare the same stationary scene, then move your head. Changes apply this session only; restart restores your configured stereo mode.");
+        }
         if (ImGui::CollapsingHeader("CVars", ImGuiTreeNodeFlags_DefaultOpen))
         {
             if (!CVars::Available()) ImGui::TextDisabled("static cvar offsets disabled");

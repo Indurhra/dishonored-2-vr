@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "ViewMapTracker.h"
 #include "StereoTaa.h"
 #include "GpuTrace.h"
 #include "GameInfo.h"
@@ -179,9 +180,11 @@ namespace
 
     // ---- the TAA's PerViewCB, shadowed on its way in ----
     // The view matrix in it says which view (hence which eye) a dispatch belongs to. Only the buffers seen bound as the
-    // TAA's PerViewCB are shadowed (learned at the dispatch), so the cost for every other Map is a few compares.
+    // TAA's PerViewCB and same-sized constant-buffer candidates are shadowed before dispatch.
+    // Binding and matrix matching still establish eye identity; size alone never does.
     constexpr int kViewCbMax = 16;
     std::atomic<void*> g_ViewCbs[kViewCbMax];
+    std::atomic<UINT> g_ViewCbSize{ 0 };
     std::atomic<int> g_ViewMatOff{ -1 };      // byte offset of cb_viewmatrix in PerViewCB (from reflection)
     std::atomic<unsigned long long> g_TaaSerial{ 0 };   // the main view (ViewMatrixHook serial) of the latest TAA dispatch RECORDED
     // ... and of the latest one EXECUTED: on the immediate context at once, on a deferred one when its command list is
@@ -192,7 +195,8 @@ namespace
     struct TaaCtx { void* k = nullptr; unsigned long long s = 0; };
     TaaCtx g_TaaCtx[16], g_TaaList[32]; int g_TaaListNext = 0;   // under g_TaaCtxM
     std::atomic<int> g_VPOff{ -1 }, g_PrevVPOff{ -1 };   // cb_viewprojectionmatrix, cb_previousviewprojectionmatrix (diagnostics)
-    thread_local ID3D11Resource* t_MapRes = nullptr; thread_local void* t_MapPtr = nullptr;
+    thread_local ViewMapTracker<32> t_ViewMaps;
+    std::atomic<unsigned long long> g_CandidateWrites{0}, g_MapOverflow{0};
     struct CbShadow { void* buf = nullptr; void* ctx = nullptr; float m[16] = {}, vp[16] = {}, pvp[16] = {}; unsigned long long stamp = 0; };
     std::mutex g_SM; CbShadow g_Sh[32]; unsigned long long g_ShStamp = 0;
     bool IsViewCb(void* r)
@@ -215,6 +219,19 @@ namespace
         if (dim != D3D11_RESOURCE_DIMENSION_BUFFER) return false;
         D3D11_BUFFER_DESC bd{}; ((ID3D11Buffer*)r)->GetDesc(&bd);
         return bd.ByteWidth >= ViewCbBytesNeeded();
+    }
+    // Capture before the first binding: a rotating buffer may be written before
+    // LearnViewCb ever sees it. Size only makes a candidate; EyeOfDispatch still
+    // requires the actual bound buffer and a matrix matching a built view.
+    bool CaptureViewCb(ID3D11Resource* r)
+    {
+        if (!r || g_ViewMatOff.load() < 0) return false;
+        if (IsViewCb(r)) return BigEnough(r);
+        D3D11_RESOURCE_DIMENSION dim{}; r->GetType(&dim);
+        if (dim != D3D11_RESOURCE_DIMENSION_BUFFER) return false;
+        D3D11_BUFFER_DESC bd{}; static_cast<ID3D11Buffer*>(r)->GetDesc(&bd);
+        return (bd.BindFlags & D3D11_BIND_CONSTANT_BUFFER) &&
+            bd.ByteWidth == g_ViewCbSize.load() && bd.ByteWidth >= ViewCbBytesNeeded();
     }
     void LearnViewCb(void* r)
     {
@@ -517,7 +534,8 @@ void StereoTaa::OnComputeShader(ID3D11ComputeShader* cs, const void* code, size_
             D3D11_SHADER_VARIABLE_DESC vd{};
             static bool listed = false;   // research (per-eye projection): what the per-view constants hold
             D3D11_SHADER_BUFFER_DESC bd{};
-            if (!listed && SUCCEEDED(cb->GetDesc(&bd)))
+            if (SUCCEEDED(cb->GetDesc(&bd))) g_ViewCbSize = bd.Size;
+            if (!listed && bd.Size)
             {
                 listed = true; std::string s;
                 for (UINT k = 0; k < bd.Variables; k++)
@@ -934,18 +952,17 @@ bool StereoTaa::PrevIsSameEye(const float vm[16])
 
 void StereoTaa::OnMap(ID3D11DeviceContext* c, ID3D11Resource* r, void* data)
 {
-    if (!IsViewCb(r) || !BigEnough(r)) return;
-    t_MapRes = r; t_MapPtr = data;
+    if (!CaptureViewCb(r)) return;
+    if (!t_ViewMaps.Remember(c, r, data)) g_MapOverflow++;
 }
 void StereoTaa::OnUnmap(ID3D11DeviceContext* c, ID3D11Resource* r)
 {
-    if (!t_MapRes || t_MapRes != r) return;
-    StoreCb(c, r, t_MapPtr);
-    t_MapRes = nullptr; t_MapPtr = nullptr;
+    if (void* data = t_ViewMaps.Take(c, r)) { StoreCb(c, r, data); g_CandidateWrites++; }
 }
+
 void StereoTaa::OnUpdate(ID3D11DeviceContext* c, ID3D11Resource* r, const void* data)
 {
-    if (IsViewCb(r) && BigEnough(r)) StoreCb(c, r, data);
+    if (CaptureViewCb(r)) { StoreCb(c, r, data); g_CandidateWrites++; }
 }
 
 void StereoTaa::OnDraw(ID3D11DeviceContext* c, int kind, int type, unsigned count, Pass& p)
@@ -1170,7 +1187,9 @@ void StereoTaa::OnPresent(IDXGISwapChain* sc)
     g_ProbeFrames = left - 1;
 }
 
-void StereoTaa::SetMode(int m) { g_Mode = m < 0 ? 0 : m > 2 ? 2 : m; ApplySkip(VRRuntime::Stereo()); }
+void StereoTaa::SetMode(int m) { g_FellBack = false; g_BadWindows = 0; g_WinFrames = 0;
+    g_WinDisp0 = g_Dispatches; g_WinSwap0 = g_Swapped; g_WinFirst0 = g_FirstUse; g_WinMono0 = g_MonoDisp;
+    g_Mode = m < 0 ? 0 : m > 2 ? 2 : m; ApplySkip(VRRuntime::Stereo()); }
 void StereoTaa::OnStereoChange(bool on) { if (!on) g_FellBack = false; ApplySkip(on); }
 int StereoTaa::Mode() { return g_Mode.load(); }
 bool StereoTaa::KeepTaaInStereo() { return g_Mode.load() != 0; }
@@ -1236,6 +1255,8 @@ bool StereoTaa::Command(const std::string& what, std::istringstream& ss)
     return false;
 }
 
+bool StereoTaa::FellBack() { return g_FellBack; }
+
 std::string StereoTaa::Status()
 {
     std::lock_guard lk(g_VM);
@@ -1246,5 +1267,6 @@ std::string StereoTaa::Status()
                        g_Patched, g_SameEye, g_SecondBuild, g_Resets, g_NoPrev, g_ProbeFrames.load())
          + fmt::format(" | jitter period {} remapped {}", g_JitPeriod, g_JitRemapped) + " | " + GpuTrace::XfViewStats()
          + fmt::format(" | drawfix {} corrected {} kept {} noview {} nomatch {} none {}", GpuTrace::EyeFixedDraws(), g_CFound.load(), g_CKept.load(), g_CNoView.load(), g_CNoMatch.load(), g_CNone.load())
+         + fmt::format(" | cbwrites {} mapoverflow {}", g_CandidateWrites.load(), g_MapOverflow.load())
          + PrevRuleStatus();
 }

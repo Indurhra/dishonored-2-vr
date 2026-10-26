@@ -27,3 +27,7 @@ endif()
 add_executable(wheel_hand WheelHandTests.cpp)
 target_compile_features(wheel_hand PRIVATE cxx_std_17)
 add_test(NAME wheel_hand COMMAND wheel_hand)
+
+add_executable(view_map_tracker ViewMapTrackerTests.cpp)
+target_compile_features(view_map_tracker PRIVATE cxx_std_17)
+add_test(NAME view_map_tracker COMMAND view_map_tracker)

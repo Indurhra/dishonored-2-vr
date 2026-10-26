@@ -74,6 +74,7 @@ namespace StereoTaa
     //! the engine's shared history (the ghosting that made us switch it off). Applies at once.
     void SetMode(int m);
     int Mode();
+    bool FellBack();
     bool KeepTaaInStereo();   //!< mode != 0
     //! `vr stereo`, before the switch: StereoTaa owns r_skipTemporalAA (forced to 1 in stereo only with TAA off: mode
     //! 0 or the safety net; the player's value back when that ends). `vr stereotaa` applies at once, stereo on or not.

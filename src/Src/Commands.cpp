@@ -1283,8 +1283,17 @@ namespace
     }
 }
 
+namespace { std::mutex g_UiCommandMutex; std::vector<std::string> g_UiCommands; }
+void Commands::Queue(const std::string& command)
+{
+    std::lock_guard lock(g_UiCommandMutex);
+    if (g_UiCommands.size() < 16) g_UiCommands.push_back(command);
+}
 void Commands::OnPresent()
 {
+    std::vector<std::string> requests;
+    { std::lock_guard lock(g_UiCommandMutex); requests.swap(g_UiCommands); }
+    for (const auto& request : requests) Execute(request);
     g_Frames++;
     LARGE_INTEGER now, fq; QueryPerformanceCounter(&now); QueryPerformanceFrequency(&fq);
     if ((now.QuadPart - g_LastPoll.QuadPart) * 10 >= fq.QuadPart)

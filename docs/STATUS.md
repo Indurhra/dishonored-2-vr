@@ -397,3 +397,16 @@ beta until it has been played on more headsets and runtimes.
 `vr repairheart` is an explicit, one-shot recovery command for a save that already owns the ordinary Heart before its first Void pickup. It removes exactly one `models/items/heart/heart.inventoryitem` through the supported game's native inventory removal function (RVA 0x614750), guarded by build, function bytes, active gameplay and quantity checks. It never runs automatically and must not be used after the legitimate pickup. Delilah Hearts and other equipment are untouched. Current UnlockEverything already excludes the Heart; older saves can retain a previously granted copy.
 
 Validated in the user's first-Void checkpoint with the mock OpenXR runtime: native removal returned 1 and inventory quantity changed from 1 to 0. Saved a separate pre-pickup quicksave (SLOT33, A Strange Visit, 26 October 2026 15:48), with original saves backed up. Actual story pickup/right-grip completion remains a headset check. Six host tests pass; they do not substitute for the story interaction check.
+
+
+### 2026-10-26: clarity comparison candidate
+
+The earlier PSVR2 session reported per-eye TAA fallback after 360 missing view-buffer shadows. This proves failed eye identification, not the cause of perceived whole-scene blur. That session rendered 2872x3743 per eye; the saved game configuration disables dynamic resolution and camera motion blur.
+
+The candidate captures constant buffers matching the reflected PerViewCB size before their first binding, retaining the bound-buffer and matrix-match checks before assigning an eye. It also tracks up to 32 outstanding mappings per thread by context and resource instead of overwriting a single mapping. Heartbeat counters expose candidate writes and overflow. The automatic TAA safety fallback remains enabled. Retrying per-eye AA resets its observation window.
+
+The existing INSERT overlay now has a Rendering panel with synchronized stereo, AER, mono, and per-eye TAA on/off. These are session-only comparison controls, operated with the desktop mouse/keyboard; controller navigation has not been implemented. Requests use the existing command path on the following Present. AFW and Toolkit settings are unchanged.
+
+Validation: Release build and seven host checks pass, including overlapping mappings, context identity, overflow preservation, and stale-entry removal. Runtime reproduction of the headset-only failure, visual menu inspection, and perceptual clarity/performance comparison remain pending. This is a diagnostic candidate, not a confirmed blur fix.
+
+Next comparison: load the repaired Void quicksave, keep synchronized stereo and the same viewpoint, compare temporal AA on versus off while still and then moving. Record whether the safety warning reappears and collect heartbeat no-shadow/swap counters. Only then compare AER at the same scene; do not interpret engine Presents/s as complete stereo pairs/s.
