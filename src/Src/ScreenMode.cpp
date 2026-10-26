@@ -347,7 +347,9 @@ bool ScreenMode::OnXrFrame(XRSession& xr, ID3D11Texture2D* bb, bool imageFlat, b
             if (!nativeInventory || !LiveWheel::PanelPose(l.pos,l.quat)) return false;
             l.srv = nativeInventory; l.srcW = l.srcH = 1024;
             l.crop[0] = l.crop[1] = 0; l.crop[2] = l.crop[3] = 1024;
-            l.gamma = false; l.soft = 0; l.width = l.height = .75f;
+            // PNG artwork and ImGui colours are gamma-encoded, blended into
+            // UNORM. Decode before the compositor's sRGB output conversion.
+            l.gamma = true; l.soft = 0; l.width = l.height = .75f;
             l.outW = l.outH = 1024;
         }
         xr.SetPanelLayer(1, l);

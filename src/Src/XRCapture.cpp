@@ -1,6 +1,7 @@
 #include <d3d11.h>
 #include <wincodec.h>
 #include <wrl/client.h>
+#include <vector>
 #include "XRCapture.h"
 
 #pragma comment(lib, "windowscodecs.lib")

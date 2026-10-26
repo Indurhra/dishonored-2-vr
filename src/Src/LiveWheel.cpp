@@ -6,6 +6,7 @@
 #include "VRRuntime.h"
 #include "KbmInject.h"
 #include "XRCapture.h"
+#include "WheelRenderer.h"
 #include <detours/detours.h>
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -18,6 +19,7 @@ namespace
 {
     using StateFn = uintptr_t (*)(void*);
     StateFn g_Enter = nullptr, g_Exit = nullptr, g_Start = nullptr, g_Stop = nullptr, g_StartFx = nullptr;
+    StateFn g_Rebuild = nullptr;
     using EquipFn = void (*)(void*);
     EquipFn g_Equip = nullptr;
     std::atomic<bool> g_Enabled{false}, g_Active{false}, g_Confirm{false}, g_Cancel{false};
@@ -26,12 +28,14 @@ namespace
     std::atomic<int> g_Selected{-1};
     std::atomic<int> g_Page{0};
     bool g_PageLatch=false;
-    constexpr int kPerPage=8;
+    constexpr int kPerPage=WheelModel::PerPage;
     std::atomic<unsigned> g_Generation{0};
     bool g_Held = false;
     std::atomic<bool> g_Ready{false};
     void* g_Player = nullptr;
-    struct Item { int id, ammo, maxAmmo; std::string name; };
+    using Item=WheelModel::Item;
+    WheelRenderer g_Renderer;
+    std::atomic<int> g_Equipped{-1};
     std::mutex g_M;
     std::vector<Item> g_Items;
     std::atomic<unsigned long long> g_Opens{0}, g_Equips{0}, g_Cancels{0}, g_SlowSkipped{0}, g_FxSkipped{0};
@@ -48,6 +52,15 @@ namespace
     template<class T> T Fn(uintptr_t rva) { return reinterpret_cast<T>(GameInfo::Base()+rva); }
     int Token(void* self) { return *reinterpret_cast<int*>(static_cast<char*>(self)+232); }
     bool Owned(void* self) { return self && self==g_Owner.load(); }
+    std::string DeclName(const void* decl)
+    {
+        if(!decl) return {};
+        const char* text=*reinterpret_cast<const char*const*>(static_cast<const char*>(decl)+8);
+        MEMORY_BASIC_INFORMATION m{};
+        if(!text || !VirtualQuery(text,&m,sizeof(m)) || m.State!=MEM_COMMIT || (m.Protect&(PAGE_GUARD|PAGE_NOACCESS))) return {};
+        const size_t length=std::min<size_t>(512,static_cast<const char*>(m.BaseAddress)+m.RegionSize-text);
+        return std::string(text,strnlen(text,length));
+    }
     void Populate(void* self)
     {
         std::vector<Item> items;
@@ -62,9 +75,27 @@ namespace
                 auto* localized=Fn<void*(*)(const void*)>(0x1653A0)(e);
                 const char* text=localized ? Fn<const char*(*)(void*)>(0x1D9090)(localized) : nullptr;
                 items.push_back({*reinterpret_cast<const int*>(e+8), *reinterpret_cast<const int*>(e+12),
-                                 *reinterpret_cast<const int*>(e+16), text ? text : ""});
+                                 *reinterpret_cast<const int*>(e+16), text ? text : "",
+                                 DeclName(*reinterpret_cast<void*const*>(e+24)),DeclName(*reinterpret_cast<void*const*>(e+32))});
             }
-        std::lock_guard lk(g_M); g_Items=std::move(items);
+        g_Equipped=Fn<int(*)(void*)>(0x4F5B30)(self);
+        std::lock_guard lk(g_M);
+        if(g_Active.load())
+        {
+            int page=g_Page.load(),pick=g_Selected.load();
+            WheelModel::Reconcile(g_Items,items,page,pick,g_PageLatch);
+            if(pick<0) g_Confirm=false;
+            g_Page=page;g_Selected=pick;
+        }
+        g_Items=std::move(items);
+    }
+    uintptr_t Rebuild(void* self)
+    {
+        const auto result=g_Rebuild(self);
+        // Observe native rebuilds on the engine's own thread. Do not mutate or
+        // poll the inventory from the render/OpenXR thread.
+        if(Owned(self) && g_Active.load() && Game::LocalPlayer()==g_Player) Populate(self);
+        return result;
     }
     uintptr_t Enter(void* self)
     {
@@ -114,9 +145,9 @@ namespace
         // alone stops its effects but does not queue UI-state removal on cancellation.
         // OnWheelDisabled queues this state's ID once and sets its normal-exit flag.
         Fn<void(*)(void*)>(0x4F6510)(self);
-        int id=-1;
+        int id=-1;Item selected;
         { std::lock_guard lk(g_M); const int pick=g_Selected.load();
-          if (pick>=0 && pick<(int)g_Items.size()) id=g_Items[pick].id; }
+          if (pick>=0 && pick<(int)g_Items.size()) { selected=g_Items[pick];id=selected.id; } }
         DWORD foreground=0;GetWindowThreadProcessId(GetForegroundWindow(),&foreground);
         if (!g_Confirm.exchange(false) || g_Cancel.load() || id<0 || !g_Ready || foreground!=GetCurrentProcessId() ||
             Game::LocalPlayer()!=g_Player || KbmInject::GetStats().mode!=2)
@@ -135,6 +166,7 @@ namespace
             if (*reinterpret_cast<const int*>(e+8)!=id || !e[20]) continue;
             auto* primary=*reinterpret_cast<void*const*>(e+24);
             auto* secondary=*reinterpret_cast<void*const*>(e+32);
+            if(DeclName(primary)!=selected.primary || DeclName(secondary)!=selected.secondary) break;
             Fn<void(*)(void*,void*,void*)>(0x7FB350)(controller,primary,secondary);
             g_Equips++; LOGI("LiveWheel: native equip item {}",id); return;
         }
@@ -149,16 +181,20 @@ bool LiveWheel::Install()
     const unsigned char start[]={0x48,0x89,0x5c,0x24,0x10,0x57,0x48,0x83};
     const unsigned char equip[]={0x48,0x8b,0xc4,0x57,0x48,0x81,0xec,0xf0};
     const unsigned char fx[]={0x48,0x89,0x5c,0x24,0x10,0x56,0x48,0x83};
+    const unsigned char rebuild[]={0x48,0x89,0x4c,0x24,0x08,0x53,0x57,0x41};
     for (auto rva : {0x4F5AE0,0x4F56B0,0x4F7530})
         if (memcmp(Fn<void*>(rva),common,8)) { LOGI("LiveWheel: lifecycle bytes differ, disabled"); return false; }
-    if (memcmp(Fn<void*>(0x4F7490),start,8) || memcmp(Fn<void*>(0x4F5710),equip,8) || memcmp(Fn<void*>(0x7912E0),fx,8)) return false;
+    if (memcmp(Fn<void*>(0x4F7490),start,8) || memcmp(Fn<void*>(0x4F5710),equip,8) || memcmp(Fn<void*>(0x7912E0),fx,8) ||
+        memcmp(Fn<void*>(0x4F5360),rebuild,8)) return false;
     g_Enter=Fn<StateFn>(0x4F5AE0); g_Exit=Fn<StateFn>(0x4F56B0);
     g_Start=Fn<StateFn>(0x4F7490); g_Stop=Fn<StateFn>(0x4F7530); g_Equip=Fn<EquipFn>(0x4F5710);
     g_StartFx=Fn<StateFn>(0x7912E0);
+    g_Rebuild=Fn<StateFn>(0x4F5360);
     DetourTransactionBegin(); DetourUpdateThread(GetCurrentThread());
     DetourAttach((PVOID*)&g_Enter,Enter); DetourAttach((PVOID*)&g_Exit,Exit);
     DetourAttach((PVOID*)&g_Start,Start); DetourAttach((PVOID*)&g_Stop,Stop); DetourAttach((PVOID*)&g_Equip,Equip);
     DetourAttach((PVOID*)&g_StartFx,StartFx);
+    DetourAttach((PVOID*)&g_Rebuild,Rebuild);
     const auto result=DetourTransactionCommit();
     LOGI("LiveWheel: native lifecycle/inventory/equip hooks {}", result==NO_ERROR ? "installed" : "FAILED");
     return result==NO_ERROR;
@@ -187,6 +223,13 @@ bool LiveWheel::Input(float x,float y,bool held,bool cancel,bool tracked,int pag
     g_Held=held;
     return false;
 }
+void LiveWheel::Prepare(ID3D11Device* dev)
+{
+    // Load art before the first wheel opening, while the ImGui context is ready.
+    const bool ready=g_Renderer.Initialize(dev,std::filesystem::path(GameInfo::GameDir())/L"DVR_assets"/L"wheel");
+    static bool logged=false;
+    if(!logged) { LOGI("LiveWheel: native artwork {}",ready ? "loaded" : "incomplete; missing icons use item labels"); logged=true; }
+}
 bool LiveWheel::Render(ID3D11Device* dev,ID3D11DeviceContext* ctx)
 {
     if (!Active()) { g_Ready=false; return false; }
@@ -203,37 +246,11 @@ bool LiveWheel::Render(ID3D11Device* dev,ID3D11DeviceContext* ctx)
         }
         g_Tex=tex;g_Rtv=rtv;g_Srv=srv;
     }
+    Prepare(dev);
     ImGui_ImplDX11_NewFrame(); ImGui_ImplWin32_NewFrame(); ImGui::GetIO().DisplaySize=ImVec2(kSize,kSize); ImGui::NewFrame();
-    auto* dl=ImGui::GetForegroundDrawList(); const ImVec2 centre(512,512);
-    // A standalone ring: no full disc, native veil, or controls-bar artwork.
-    dl->AddCircle(centre,350,IM_COL32(190,205,215,125),96,2.f);
-    std::vector<Item> items; { std::lock_guard lk(g_M); items=g_Items; }
-    const int pick=g_Selected.load(), start=g_Page.load()*kPerPage;
-    const int n=std::min(kPerPage,(int)items.size()-start);
-    for (int slot=0;slot<n;++slot)
-    {
-        const int i=start+slot;
-        const float a=slot*2.f*WheelSelection::pi/n;
-        const ImVec2 p(512+350*std::sin(a),512-350*std::cos(a));
-        const bool selected=i==pick;
-        dl->AddCircleFilled(p, std::min(94.f,970.f/std::max(6,n)),selected ? IM_COL32(40,135,175,245) : IM_COL32(35,43,55,240),32);
-        dl->AddText(nullptr,26,ImVec2(p.x-80,p.y-30),IM_COL32(245,245,245,255),items[i].name.c_str(),nullptr,160);
-        if (items[i].ammo>=0)
-        {
-            const auto ammo=fmt::format("{} / {}",items[i].ammo,items[i].maxAmmo);
-            dl->AddText(nullptr,20,ImVec2(p.x-35,p.y+32),IM_COL32(200,215,225,255),ammo.c_str());
-        }
-    }
-    const char* label=pick>=0 && pick<(int)items.size() ? items[pick].name.c_str() : "Cancel";
-    const ImVec2 text=ImGui::GetFont()->CalcTextSizeA(28,1000,280,label);
-    dl->AddText(nullptr,28,ImVec2(512-text.x*.5f,460),IM_COL32(255,255,255,255),label,nullptr,280);
-    const int pages=std::max(1,((int)items.size()+kPerPage-1)/kPerPage);
-    if (pages>1)
-    {
-        const auto page=fmt::format("{} / {}",g_Page.load()+1,pages);
-        const auto size=ImGui::GetFont()->CalcTextSizeA(20,1000,0,page.c_str());
-        dl->AddText(nullptr,20,ImVec2(512-size.x*.5f,520),IM_COL32(205,215,225,255),page.c_str());
-    }
+    std::vector<Item> items; int page,pick;
+    { std::lock_guard lk(g_M); items=g_Items;page=g_Page.load();pick=g_Selected.load(); }
+    g_Renderer.Draw(items,page,pick,g_Equipped.load());
     ImGui::Render(); const float clear[4]={}; ctx->OMSetRenderTargets(1,&g_Rtv,nullptr); ctx->ClearRenderTargetView(g_Rtv,clear);
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData()); g_Ready=true;
     if (g_Shot.exchange(false))

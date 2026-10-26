@@ -7,6 +7,7 @@ struct ID3D11ShaderResourceView;
 namespace LiveWheel
 {
     bool Install();
+    void Prepare(ID3D11Device* device);
     bool Active();
     bool Enabled();
     bool Closed();

@@ -86,6 +86,7 @@ namespace
         ImGui::GetIO().IniFilename = nullptr;
         ImGui_ImplWin32_Init(g_Hwnd);
         ImGui_ImplDX11_Init(g_Device, g_Ctx);
+        LiveWheel::Prepare(g_Device);
         g_OrigWndProc = (WNDPROC)SetWindowLongPtrW(g_Hwnd, GWLP_WNDPROC, (LONG_PTR)WndProc);
         QueryPerformanceCounter(&g_LastT);
         if (GetEnvironmentVariableW(L"DVR_OVERLAY_AUTOSHOW", nullptr, 0)) g_Visible = true; // headless testing

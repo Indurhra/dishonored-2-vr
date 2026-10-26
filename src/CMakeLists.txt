@@ -70,6 +70,7 @@ set(MOD_SOURCES
     Src/StereoTaa.cpp  Src/StereoTaa.h
     Src/StereoSync.cpp Src/StereoSync.h
     Src/LiveWheel.cpp Src/LiveWheel.h Src/WheelSelection.h
+    Src/WheelRenderer.cpp Src/WheelRenderer.h Src/WheelModel.h
     Src/MetaAsw.cpp Src/MetaAsw.h
     Src/ScreenMode.cpp Src/ScreenMode.h
     Src/BinkVideo.cpp  Src/BinkVideo.h
@@ -121,3 +122,11 @@ target_link_libraries(DishonoredVR PRIVATE
 set_target_properties(DishonoredVR PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${OUT_DIR}" RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OUT_DIR}")
 target_link_options(DishonoredVR PRIVATE "/PDBALTPATH:DishonoredVR.pdb")   # (see dinput8 above)
+
+option(DVR_BUILD_WHEEL_PREVIEW "Build standalone wheel renderer (does not launch or install into the game)" OFF)
+if(DVR_BUILD_WHEEL_PREVIEW)
+    add_executable(wheel_preview ../tools/wheel_preview.cpp Src/WheelRenderer.cpp Src/XRCapture.cpp)
+    target_include_directories(wheel_preview PRIVATE Src)
+    target_link_libraries(wheel_preview PRIVATE imgui::imgui d3d11 dxgi windowscodecs ole32)
+    set_target_properties(wheel_preview PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OUT_DIR}")
+endif()
