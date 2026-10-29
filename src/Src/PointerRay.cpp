@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "PointerRay.h"
 #include "GpuTrace.h"
@@ -157,7 +158,7 @@ namespace
 }
 
 void PointerRay::OnPresent()
-{
+{ DVR_PROFILE("PointerRay.PointerRay::OnPresent");
     g_Frames++;
     LARGE_INTEGER now, fq; QueryPerformanceCounter(&now); QueryPerformanceFrequency(&fq);
     float dt = g_LastT.QuadPart ? (float)((double)(now.QuadPart - g_LastT.QuadPart) / (double)fq.QuadPart) : 0.f;

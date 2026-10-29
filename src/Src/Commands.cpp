@@ -1,5 +1,12 @@
+#include "SceneFoveation.h"
+#include "FrameProfile.h"
+#include "DlssLive.h"
+#ifdef DVR_HAS_PDAFW
+#include "AfwLive.h"
+#endif
 #include "pch.h"
 #include "Commands.h"
+#include "ToolkitDiagnostic.h"
 #include "Watchdog.h"
 #include "WaitTrace.h"
 #include "GameInfo.h"
@@ -67,7 +74,9 @@ namespace
     bool FrameCommand(const std::string& what, std::istringstream& ss)
     {
         // a game hitch on demand: the render thread sleeps <ms> at the next Present (Watchdog)
-        if (what == "stall") { int ms = 3000; ss >> ms; Watchdog::Stall(ms); }
+        if (what == "scenevrs") { int m=0; ss>>m; SceneFoveation::SetMode(m); LOGI("{}",SceneFoveation::Status()); }
+        else if (what == "toolkitvrs") { std::string m="status"; ss >> m; ToolkitDiagnostic(m); }
+        else if (what == "stall") { int ms = 3000; ss >> ms; Watchdog::Stall(ms); }
         // the OpenXR frame thread: 0 = the headset waits while the game sends no frame (the old hourglass); the render
         // thread's bound on the wait for a frame; a new session after <s> for one the runtime stopped and did not offer
         // back (0 = wait for it, the old way)
@@ -1112,6 +1121,9 @@ namespace
                 // the world, ghosting in motion); 2 = synchronised (StereoSync: two frames per pair, the second one held,
                 // both eyes from one instant and one located head pose, submitted together).
                 int m = 1; ss >> m;
+#ifdef DVR_HAS_PDAFW
+                AfwLive::Enable(false);
+#endif
                 StereoTaa::OnStereoChange(m != 0);
                 StereoSync::SetActive(m == 2);
                 VRRuntime::SetStereo(m == 1);
@@ -1149,10 +1161,11 @@ namespace
         std::ofstream f(path, std::ios::trunc);
         f << "frames " << g_Frames << "\n"
           << "xr_init " << st.initialized << "\nxr_running " << st.running << "\nxr_state " << st.state
-          << "\nxr_frames " << st.framesSubmitted << "\nxr_eye " << st.eyeW << "x" << st.eyeH
+          << "\nxr_frames " << st.framesSubmitted << "\nxr_accepted " << st.framesAccepted << "\nxr_native_pairs_accepted " << st.nativePairsAccepted << "\nxr_eye " << st.eyeW << "x" << st.eyeH
           << "\nxr_runtime " << st.runtime << "\nxr_system " << st.system << "\nxr_error " << st.error
           << "\nxr_stereo " << VRRuntime::Stereo() << " mode " << (StereoSync::Active() ? "2 synchronised" : VRRuntime::Stereo() ? "1 alternating" : "0 mono") << " eye " << VRRuntime::CurrentEye() << " presented " << VRRuntime::PresentedEye() << "\n";
         f << RenderRes::Status() << "\n";
+        f << DlssLive::Status()+"\n"+SceneFoveation::Status() << "\n";
         f << StereoTaa::Status() << "\n";
         f << StereoSync::Status() << "\n";
         f << LiveWheel::Status() << "\n";
@@ -1224,21 +1237,21 @@ namespace
             f << "weaponpose " << WeaponPose::Enabled() << " calls " << wp.calls << " applied L/R " << wp.appliedL << " " << wp.appliedR << " ents " << wp.lastL << " " << wp.lastR << " tset " << wp.tsetCalls << "/" << wp.tsetApplied << "\n";
             f << "aimcp " << HandAimHook::AimCpnt() << " gun "<< HandAimHook::GunCpnt() << " calls " << hs.gunCalls << " spawn " << hs.gunSpawn[0] << " " << hs.gunSpawn[1] << " " << hs.gunSpawn[2] << "\n";
         }
-        if (g_AimCpnt)
-        {
-            const float* d = (const float*)(g_AimCpnt + 0x2C); const float* pos = (const float*)(g_AimCpnt + 0x38);
-            f << "aimcpnt_dir " << d[0] << " " << d[1] << " " << d[2] << " pos " << pos[0] << " " << pos[1] << " " << pos[2] << "\n";
+        // Engine objects can disappear during loading. Snapshot diagnostics through
+        // ReadProcessMemory: VirtualQuery followed by a raw dereference is racy.
+        if (g_AimCpnt) {
+            float v[6]{};SIZE_T read=0;
+            if(ReadProcessMemory(GetCurrentProcess(),g_AimCpnt+0x2C,v,sizeof(v),&read)&&read==sizeof(v))
+                f << "aimcpnt_dir " << v[0] << " " << v[1] << " " << v[2] << " pos " << v[3] << " " << v[4] << " " << v[5] << "\n";
         }
-        if (uint8_t* pl = g_AimObj ? g_AimObj : (uint8_t*)HandAimHook::CameraObject())
-        {
-            MEMORY_BASIC_INFORMATION mbi{};
-            if (VirtualQuery(pl + 0x25400, &mbi, sizeof mbi) && mbi.State == MEM_COMMIT)
-            {
-                const float* ao = (const float*)(pl + 0x2527C); const float* aa = (const float*)(pl + 0x25288);
-                const float* ra = (const float*)(pl + 0x25328); const float* la = (const float*)(pl + 0x25304);
+        if (uint8_t* pl = g_AimObj ? g_AimObj : (uint8_t*)HandAimHook::CameraObject()) {
+            float v[52]{};SIZE_T read=0;
+            if(ReadProcessMemory(GetCurrentProcess(),pl+0x25264,v,sizeof(v),&read)&&read==sizeof(v)) {
+                const auto* ao=v+(0x2527C-0x25264)/4;const auto* aa=v+(0x25288-0x25264)/4;
+                const auto* ra=v+(0x25328-0x25264)/4;const auto* la=v+(0x25304-0x25264)/4;
                 f << "aim_org " << ao[0] << " " << ao[1] << " " << ao[2] << " fwd " << aa[0] << " " << aa[1] << " " << aa[2] << "\n";
                 f << "arm_r_fwd " << ra[0] << " " << ra[1] << " " << ra[2] << " arm_l_fwd " << la[0] << " " << la[1] << " " << la[2] << "\n";
-                f << "cam_pitch " << *(const float*)(pl + 0x25264) << " yaw " << *(const float*)(pl + 0x25274) << " armsPitch " << *(const float*)(pl + 0x25268) << "\n";
+                f << "cam_pitch " << v[0] << " yaw " << v[4] << "\n";
             }
         }
         {
@@ -1296,7 +1309,7 @@ void Commands::Queue(const std::string& command)
     if (g_UiCommands.size() < 16) g_UiCommands.push_back(command);
 }
 void Commands::OnPresent()
-{
+{ DVR_PROFILE("Commands.Commands::OnPresent");
     std::vector<std::string> requests;
     { std::lock_guard lock(g_UiCommandMutex); requests.swap(g_UiCommands); }
     for (const auto& request : requests) Execute(request);

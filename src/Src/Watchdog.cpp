@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "Watchdog.h"
 #include "CrashLog.h"
@@ -195,7 +196,7 @@ void Watchdog::Install()
 }
 
 void Watchdog::OnPresent(IDXGISwapChain* sc)
-{
+{ DVR_PROFILE("Watchdog.Watchdog::OnPresent");
     const double now = Now();
     if (!g_Tid[0].load())
     {

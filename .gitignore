@@ -9,3 +9,7 @@ dist/
 build-mockxr/
 tools/.disp_cache.pkl
 build-mockxr-isolated/
+
+build-q/
+build-candidate/
+build-mock-profile/

@@ -115,7 +115,7 @@ namespace VRRuntime
     {
         bool initialized = false, running = false;
         int state = 0;
-        unsigned long long framesSubmitted = 0;
+        unsigned long long framesSubmitted = 0, framesAccepted = 0, nativePairsAccepted = 0;
         unsigned eyeW = 0, eyeH = 0;
         std::string runtime, system, error;
     };

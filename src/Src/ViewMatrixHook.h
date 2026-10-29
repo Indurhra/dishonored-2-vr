@@ -63,7 +63,7 @@ namespace ViewMatrixHook
     //! must take it from here: with the eye's own axis each eye put the hands ~7 deg aside, each its own way.
     bool RenderView(float mat[16], float org[3], float axis[9], unsigned long long* serial = nullptr, float* headAxis = nullptr);
     //! The same for a given main view (the last 16 are kept): false when it is gone.
-    bool ViewBySerial(unsigned long long serial, float mat[16], float org[3], float axis[9]);
+    bool ViewBySerial(unsigned long long serial, float mat[16], float org[3], float axis[9], float* headAxis = nullptr);
     //! Which main view a draw belongs to, from the view matrix in ITS PerViewCB (StereoTaa::ViewMatrixOf): the serial
     //! of the newest view built with that matrix (either storage order), 0 = none of the last 16.
     unsigned long long SerialOfViewMatrix(const float m[16]);

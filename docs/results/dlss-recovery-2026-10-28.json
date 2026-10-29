@@ -1,0 +1,56 @@
+{
+  "recovery_final_native": {
+    "quality_flags": [],
+    "seconds": 16.074839115142822,
+    "stereo_fps": 61.58693053838405,
+    "ms_per_pair": 16.237211227416992,
+    "delta": {
+      "presents": 1980,
+      "native": 990,
+      "fresh": 0,
+      "rebuilt": 0,
+      "accepted": 0,
+      "refused": 0,
+      "taa": 1980,
+      "held": 990
+    },
+    "private_bytes_mean": 10121559341.17647,
+    "movement": 0
+  },
+  "recovery_final_quality": {
+    "quality_flags": [],
+    "seconds": 16.075781106948853,
+    "stereo_fps": 98.34669864449718,
+    "ms_per_pair": 10.16810949206126,
+    "delta": {
+      "presents": 1581,
+      "native": 0,
+      "fresh": 1581,
+      "rebuilt": 1581,
+      "accepted": 1581,
+      "refused": 0,
+      "taa": 1581,
+      "held": 0
+    },
+    "private_bytes_mean": 11450020803.764706,
+    "movement": 0
+  },
+  "recovery_final_repeat": {
+    "quality_flags": [],
+    "seconds": 16.092522144317627,
+    "stereo_fps": 94.01882355241935,
+    "ms_per_pair": 10.636167973772391,
+    "delta": {
+      "presents": 1513,
+      "native": 0,
+      "fresh": 1513,
+      "rebuilt": 1513,
+      "accepted": 1513,
+      "refused": 0,
+      "taa": 1513,
+      "held": 0
+    },
+    "private_bytes_mean": 11689303582.117647,
+    "movement": 0
+  }
+}

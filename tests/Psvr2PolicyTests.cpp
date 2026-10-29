@@ -27,10 +27,10 @@ int main() {
     }
     check(WeaponFire(Profile::Power,.2f,false));
     auto gun=makeCommand(Profile::Gun);
-    check(gun.mode==SCE_PAD_TRIGGER_EFFECT_MODE_WEAPON && gun.commandData.weaponParam.startPosition==2 &&
-        gun.commandData.weaponParam.endPosition==3 && gun.commandData.weaponParam.strength==5);
+    check(gun.mode==SCE_PAD_TRIGGER_EFFECT_MODE_WEAPON && gun.commandData.weaponParam.startPosition==5 &&
+        gun.commandData.weaponParam.endPosition==7 && gun.commandData.weaponParam.strength==5);
     auto bow=makeCommand(Profile::Crossbow);
-    check(bow.mode==SCE_PAD_TRIGGER_EFFECT_MODE_WEAPON && bow.commandData.weaponParam.startPosition==2 && bow.commandData.weaponParam.endPosition==3 && bow.commandData.weaponParam.strength==7);
+    check(bow.mode==SCE_PAD_TRIGGER_EFFECT_MODE_WEAPON && bow.commandData.weaponParam.startPosition==2 && bow.commandData.weaponParam.endPosition==3 && bow.commandData.weaponParam.strength==4);
     check(decode(pack(100,Profile::Crossbow,0),101,true).profile==Profile::Crossbow);
     check(decode(pack(100,Profile::Crossbow,1),101,true).profile==Profile::Off);
     auto power=makeCommand(Profile::Power);

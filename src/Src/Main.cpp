@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "GameInfo.h"
 #include "CrashLog.h"
@@ -37,7 +38,8 @@
 #include "Version.h"
 
 static void OnPresent(IDXGISwapChain* sc)
-{
+{ DVR_PROFILE("Main.OnPresent");
+    if(FrameProfile::active){ID3D11Device* d=nullptr;if(SUCCEEDED(sc->GetDevice(__uuidof(ID3D11Device),(void**)&d))){FrameProfile::Memory(d);d->Release();}}
     Watchdog::OnPresent(sc);      // the heartbeat its thread watches (and vr stall's test hitch)
     WristHud::BeginPresent(sc);   // the game's interface for this frame is complete (and the mod's own draws start)
     static bool first = true;
@@ -131,6 +133,14 @@ static DWORD WINAPI InitThread(LPVOID)
         SetEnvironmentVariableA("XR_CORE_VALIDATION_EXPORT_TYPE", "html");
         SetEnvironmentVariableA("XR_CORE_VALIDATION_FILE_NAME", (std::string(dir.begin(), dir.end()) + "\\DVR_xrvalidation.html").c_str());
         LOGI("OpenXR core validation layer enabled from {} (report: DVR_xrvalidation.html, written at once; empty of messages = no violations)", s);
+    }
+    // Scope Toolkit compatibility experiments to this process; other games retain their layer.
+    SetEnvironmentVariableA("DISABLE_XR_APILAYER_MBUCCHIA_toolkit", "1");
+    if (std::string s = ReadOneLine(L"DVR_toolkit.txt"); !s.empty()) {
+        SetEnvironmentVariableA("XR_API_LAYER_PATH",s.c_str());
+        SetEnvironmentVariableA("XR_ENABLE_API_LAYERS","XR_APILAYER_MBUCCHIA_toolkit");
+        SetEnvironmentVariableA("DISABLE_XR_APILAYER_MBUCCHIA_toolkit", nullptr);
+        LOGI("Diagnostic Toolkit layer requested from {}",s);
     }
     D3D11Hook::Callbacks cb; cb.onPresent = OnPresent; cb.onResize = Overlay::OnResize;
     D3D11Hook::Install(cb);

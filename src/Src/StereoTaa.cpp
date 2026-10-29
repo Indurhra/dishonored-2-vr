@@ -1,6 +1,19 @@
+#include "SceneFoveation.h"
+#include "FrameProfile.h"
+#include "StereoSync.h"
+#ifdef DVR_HAS_PDAFW
+#include "AfwLive.h"
+#include "AfwInputs.h"
+#endif
 #include "pch.h"
 #include "ViewMapTracker.h"
 #include "StereoTaa.h"
+#include "TemporalCapture.h"
+#include "GpuListTiming.h"
+#include "TemporalBoundary.h"
+#include "DlssLive.h"
+#include "DlssStageTiming.h"
+#include "RenderRes.h"
 #include "GpuTrace.h"
 #include "GameInfo.h"
 #include "VRRuntime.h"
@@ -79,7 +92,10 @@ namespace
     // Found 2026-10-14 by diffing every pass of a frame with r_skipTemporalAA 0 and 1: one 16x16 compute shader reading
     // ro_taahistory_read, ro_motionvectors and ro_viewcolormap and writing rw_taahistory_write and rw_taaresult. The
     // names, not the hash, identify it, so a variant of the shader (another quality setting) is recognised too.
-    struct TaaCs { int histSrv = -1, histUav = -1, mvSrv = -1, viewCb = -1, viewMatOff = -1; };
+    struct TemporalBinding { std::string name; UINT slot; D3D_SHADER_INPUT_TYPE type; };
+    struct TaaCs { int histSrv = -1, histUav = -1, mvSrv = -1, colorSrv = -1, resultUav = -1, viewCb = -1, viewMatOff = -1; std::vector<TemporalBinding> bindings; };
+    std::atomic<int> g_TemporalAudit{0}, g_DepthAudit{0};
+    std::map<void*, TaaCs> g_DepthCs;
     std::mutex g_CsM;
     std::map<void*, TaaCs> g_TaaCs;
     std::atomic<unsigned> g_TaaShaders{ 0 };
@@ -94,7 +110,7 @@ namespace
     // ---- the views ViewMatrixHook built, with their eye ----
     struct ViewRec
     {
-        unsigned frame = 0; int eye = -1; float m[16] = {}; float jitter[2] = {}; unsigned long long seq = 0;
+        unsigned frame = 0; int eye = -1; float m[16] = {}; float projection[16] = {}; float jitter[2] = {}; unsigned long long seq = 0;
         bool prevMine = false;   // the engine's "previous" matrices for this view are its own eye's
         bool hasC = false;       // C = VP(this eye, its last frame) * VP(the frame before, the other eye)^-1
         float C[16] = {};        // takes a clip position computed with the other eye's last VP to this eye's
@@ -194,10 +210,11 @@ namespace
     std::mutex g_TaaCtxM;
     struct TaaCtx { void* k = nullptr; unsigned long long s = 0; };
     TaaCtx g_TaaCtx[16], g_TaaList[32]; int g_TaaListNext = 0;   // under g_TaaCtxM
+    std::atomic<int> g_ResolutionOff{-1},g_UpscaleAudit{0};
     std::atomic<int> g_VPOff{ -1 }, g_PrevVPOff{ -1 };   // cb_viewprojectionmatrix, cb_previousviewprojectionmatrix (diagnostics)
     thread_local ViewMapTracker<32> t_ViewMaps;
     std::atomic<unsigned long long> g_CandidateWrites{0}, g_MapOverflow{0};
-    struct CbShadow { void* buf = nullptr; void* ctx = nullptr; float m[16] = {}, vp[16] = {}, pvp[16] = {}; unsigned long long stamp = 0; };
+    struct CbShadow { void* buf = nullptr; void* ctx = nullptr; float m[16] = {}, vp[16] = {}, pvp[16] = {}, resolution[2] = {}; unsigned long long stamp = 0; };
     std::mutex g_SM; CbShadow g_Sh[32]; unsigned long long g_ShStamp = 0;
     bool IsViewCb(void* r)
     {
@@ -211,6 +228,7 @@ namespace
     {
         int need = g_ViewMatOff.load() + 64;
         need = std::max(need, g_VPOff.load() + 64); need = std::max(need, g_PrevVPOff.load() + 64);
+        need = std::max(need,g_ResolutionOff.load()+8);
         return (UINT)need;
     }
     bool BigEnough(void* r)
@@ -254,6 +272,7 @@ namespace
         CbShadow& s = g_Sh[slot];
         s.buf = buf; s.ctx = ctx; s.stamp = ++g_ShStamp;
         memcpy(s.m, (const uint8_t*)data + off, 64);
+        if(g_ResolutionOff.load()>=0)memcpy(s.resolution,(const uint8_t*)data+g_ResolutionOff.load(),8);
         if (g_VPOff.load() >= 0) memcpy(s.vp, (const uint8_t*)data + g_VPOff.load(), 64);
         if (g_PrevVPOff.load() >= 0) memcpy(s.pvp, (const uint8_t*)data + g_PrevVPOff.load(), 64);
     }
@@ -468,7 +487,8 @@ namespace
     void DumpAtDispatch(ID3D11DeviceContext* c, const TaaCs& t, int eye)
     {
         if (g_DumpReq.load() <= 0) return;
-        const int slots[3] = { t.histSrv, t.mvSrv, 2 };
+        if (t.histSrv < 0 || t.mvSrv < 0 || t.colorSrv < 0) return;
+        const int slots[3] = { t.histSrv, t.mvSrv, t.colorSrv };
         std::lock_guard lk(g_DumpM);
         if (g_DumpPending) return;
         bool ready = true;
@@ -510,7 +530,7 @@ namespace
 void StereoTaa::OnComputeShader(ID3D11ComputeShader* cs, const void* code, size_t len)
 {
     {   // an address reused by another shader must not keep the old one's entry
-        std::lock_guard lk(g_CsM); g_TaaCs.erase(cs);
+        std::lock_guard lk(g_CsM); g_TaaCs.erase(cs); g_DepthCs.erase(cs);
     }
     using Reflect_t = HRESULT(WINAPI*)(LPCVOID, SIZE_T, REFIID, void**);
     static Reflect_t reflect = nullptr; static bool tried = false;
@@ -525,6 +545,9 @@ void StereoTaa::OnComputeShader(ID3D11ComputeShader* cs, const void* code, size_
         {
             D3D11_SHADER_INPUT_BIND_DESC b{};
             if (FAILED(r->GetResourceBindingDesc(i, &b)) || !b.Name) continue;
+            t.bindings.push_back({b.Name, b.BindPoint, b.Type});
+            if (!strcmp(b.Name, "ro_viewcolormap")) t.colorSrv = (int)b.BindPoint;
+            if (!strcmp(b.Name, "rw_taaresult")) t.resultUav = (int)b.BindPoint;
             if (!strcmp(b.Name, "ro_taahistory_read")) t.histSrv = (int)b.BindPoint;
             else if (!strcmp(b.Name, "rw_taahistory_write")) t.histUav = (int)b.BindPoint;
             else if (!strcmp(b.Name, "ro_motionvectors")) t.mvSrv = (int)b.BindPoint;
@@ -549,9 +572,15 @@ void StereoTaa::OnComputeShader(ID3D11ComputeShader* cs, const void* code, size_
                     if (ID3D11ShaderReflectionVariable* v = cb->GetVariableByIndex(k)) if (SUCCEEDED(v->GetDesc(&vd)) && vd.Name) s += fmt::format(" {}@{}:{}", vd.Name, vd.StartOffset, vd.Size);
                 LOGI("StereoTaa: PerViewCB ({} bytes, {} variables):{}", bd.Size, bd.Variables, s);
             }
+            if(ID3D11ShaderReflectionVariable* v=cb->GetVariableByName("cb_resolutionscale"))if(SUCCEEDED(v->GetDesc(&vd)))g_ResolutionOff=(int)vd.StartOffset;
             if (ID3D11ShaderReflectionVariable* v = cb->GetVariableByName("cb_viewprojectionmatrix")) if (SUCCEEDED(v->GetDesc(&vd))) g_VPOff = (int)vd.StartOffset;
             if (ID3D11ShaderReflectionVariable* v = cb->GetVariableByName("cb_previousviewprojectionmatrix")) if (SUCCEEDED(v->GetDesc(&vd))) g_PrevVPOff = (int)vd.StartOffset;
         }
+    // Names identify candidates only. The audit never treats a matching name or size
+    // as proof of scene-depth provenance (shadow/depth-pyramid passes also match).
+    for(const auto& binding:t.bindings)if(binding.name.find("depth")!=std::string::npos){
+        std::lock_guard lk(g_CsM);g_DepthCs[cs]=t;break;
+    }
     r->Release();
     if (t.histSrv < 0 || t.histUav < 0 || t.viewCb < 0 || t.viewMatOff < 0) return;
     g_ViewMatOff = t.viewMatOff;
@@ -568,7 +597,7 @@ void StereoTaa::OnMainView(void* view, int eye, const float vm[16])
     const unsigned frame = *(const uint32_t*)(v + kFrameNo);
     std::lock_guard lk(g_VM);
     ViewRec& rec = g_Ring[++g_ViewSeq % 16];
-    rec.seq = g_ViewSeq; rec.frame = frame; rec.eye = eye; memcpy(rec.m, vm, 64); memcpy(rec.jitter, v + kCurJitter, 8); rec.prevMine = false;
+    rec.seq = g_ViewSeq; rec.frame = frame; rec.eye = eye; memcpy(rec.m, vm, 64); memcpy(rec.jitter, v + kCurJitter, 8); rec.prevMine = false; memcpy(rec.projection, v + kProj, 64);
     if (g_Mode.load() != 1 || eye < 0 || !VRRuntime::Stereo())
     {
         g_HaveLast = false; g_Prev[0].valid = g_Prev[1].valid = false;
@@ -605,6 +634,7 @@ void StereoTaa::OnMainView(void* view, int eye, const float vm[16])
             }
         }
     }
+    memcpy(rec.projection, v + kProj, 64);
     // The engine has just copied the last frame's matrices into "previous": they belong to the eye that frame was
     // rendered from. Keep them for that eye, and hand this frame the ones of ITS eye's last frame.
     if (g_HaveLast && g_LastEye >= 0) { PrevSet& p = g_Prev[g_LastEye]; ReadPrev(v, p); p.valid = true; p.frame = g_LastFrame; }
@@ -972,8 +1002,52 @@ void StereoTaa::OnUpdate(ID3D11DeviceContext* c, ID3D11Resource* r, const void* 
     if (CaptureViewCb(r)) { StoreCb(c, r, data); g_CandidateWrites++; }
 }
 
+// Read the actual per-view scale on the recording context, not a requested quality ratio.
+static bool DlssResolution(ID3D11DeviceContext* c,ID3D11Buffer* cb,float out[2]){
+ std::lock_guard lock(g_SM);const CbShadow* best=nullptr;
+ for(auto& sh:g_Sh)if(sh.buf==cb&&sh.stamp&&(!best||(sh.ctx==c)>(best->ctx==c)||((sh.ctx==c)==(best->ctx==c)&&sh.stamp>best->stamp)))best=&sh;
+ if(!best||g_ResolutionOff.load()<0)return false;memcpy(out,best->resolution,8);return true;
+}
 void StereoTaa::OnDraw(ID3D11DeviceContext* c, int kind, int type, unsigned count, Pass& p)
 {
+    if(SceneFoveation::Enabled() && kind==1 && count>6 && VRRuntime::Stereo() && !ScreenMode::FlatRender()) {
+        ID3D11Buffer* cb=nullptr; c->VSGetConstantBuffers(1,1,&cb); float matrix[16]{};
+        if(cb){ if(ViewMatrixOf(c,cb,matrix)) p.sceneVrs=SceneFoveation::Begin(c,ViewMatrixHook::SerialOfViewMatrix(matrix)); cb->Release(); }
+    }
+    if(!p.sceneVrs) SceneFoveation::End(c);
+    // Both audited D2 boundaries are non-indexed fullscreen triangles. Avoid shader
+    // lookup and its shared lock on thousands of unrelated scene draws.
+    if(kind==1&&(!DlssLive::FullscreenScan()||(type==1&&count==3))&&DlssLive::Enabled()&&DlssLive::Quality()>0&&VRRuntime::Stereo()&&!ScreenMode::FlatRender()){
+        ID3D11PixelShader* shader=nullptr;c->PSGetShader(&shader,nullptr,nullptr);const auto hash=GpuTrace::ShaderHashOf(shader);if(shader)shader->Release();
+        // These two shaders and their bindings were captured and disassembled in D2.
+        if(hash==0x7f17d0b9bf1fea47ull||hash==0xec1204b254163299ull){
+            ID3D11Buffer* cb=nullptr;c->PSGetConstantBuffers(1,1,&cb);float matrix[16]{},resolution[2]{};bool hasResolution=false;unsigned long long serial=0;
+            if(cb){if(ViewMatrixOf(c,cb,matrix))serial=ViewMatrixHook::SerialOfViewMatrix(matrix);hasResolution=DlssResolution(c,cb,resolution);cb->Release();}
+            if(serial){const auto pose=ViewMatrixHook::RenderPoseXr(serial);
+                if(pose.valid&&!pose.flat&&pose.serial==serial&&pose.eye>=0&&pose.eye<2){
+                    ID3D11RenderTargetView* target=nullptr;c->OMGetRenderTargets(1,&target,nullptr);
+                    if(hash==0x7f17d0b9bf1fea47ull){D3D11_VIEWPORT vp{};UINT n=1;c->RSGetViewports(&n,&vp);if(n)DlssLive::ObserveTone(c,serial,pose.eye,target,vp);}
+                    else{ID3D11ShaderResourceView* color=nullptr;c->PSGetShaderResources(0,1,&color);if(hasResolution)p.dlssBatch=DlssLive::CaptureUpscale(c,serial,pose.eye,color,target,resolution);if(color)color->Release();}
+                    if(target)target->Release();
+                }
+            }
+        }
+    }
+    if(kind==1&&g_UpscaleAudit.load()>0){
+        ID3D11PixelShader* shader=nullptr;c->PSGetShader(&shader,nullptr,nullptr);
+        const bool match=shader&&GpuTrace::ShaderHashOf(shader)==0xec1204b254163299ull;if(shader)shader->Release();
+        if(match&&g_UpscaleAudit.fetch_sub(1)>0){
+            ID3D11Buffer* cb=nullptr;c->PSGetConstantBuffers(1,1,&cb);float matrix[16]{},scale[2]{};unsigned long long serial=0;
+            if(cb){if(ViewMatrixOf(c,cb,matrix))serial=ViewMatrixHook::SerialOfViewMatrix(matrix);
+                std::lock_guard lock(g_SM);const CbShadow* best=nullptr;for(auto& sh:g_Sh)if(sh.buf==cb&&sh.stamp&&(!best||(sh.ctx==c)>(best->ctx==c)||((sh.ctx==c)==(best->ctx==c)&&sh.stamp>best->stamp)))best=&sh;
+                if(best)memcpy(scale,best->resolution,8);cb->Release();}
+            ID3D11ShaderResourceView* input=nullptr;ID3D11RenderTargetView* target=nullptr;c->PSGetShaderResources(0,1,&input);c->OMGetRenderTargets(1,&target,nullptr);
+            D3D11_SHADER_RESOURCE_VIEW_DESC sd{};D3D11_RENDER_TARGET_VIEW_DESC td{};if(input)input->GetDesc(&sd);if(target)target->GetDesc(&td);
+            D3D11_VIEWPORT vp{};UINT n=1;c->RSGetViewports(&n,&vp);
+            LOGI("upscaleinputs serial {} context {} scale {:.9f},{:.9f} viewport {}x{} input {} srvformat {} output {} rtvformat {}",serial,kind,scale[0],scale[1],vp.Width,vp.Height,ViewRes(input),int(sd.Format),ViewRes(target),int(td.Format));
+            if(input)input->Release();if(target)target->Release();
+        }
+    }
     if (g_ProbeFrames.load() <= 0) return;
     const bool all = g_ProbeAll.load();
     if (!all && count > 6) return;
@@ -995,6 +1069,7 @@ void StereoTaa::OnDraw(ID3D11DeviceContext* c, int kind, int type, unsigned coun
 
 void StereoTaa::OnDispatch(ID3D11DeviceContext* c, int kind, unsigned x, unsigned y, unsigned z, bool indirect, Pass& p)
 {
+    SceneFoveation::End(c);
     ID3D11ComputeShader* cs = nullptr; c->CSGetShader(&cs, nullptr, nullptr);
     TaaCs t; const bool taa = cs && FindTaa(cs, t);
     if (g_ProbeFrames.load() > 0)
@@ -1012,8 +1087,95 @@ void StereoTaa::OnDispatch(ID3D11DeviceContext* c, int kind, unsigned x, unsigne
         }
         ReleaseAll(srv, 16); ReleaseAll(uav, 8);
     }
+    if(TemporalCapture::Active()||DlssLive::Enabled()){
+        TaaCs candidate;bool found=taa;if(taa)candidate=t;
+        else {std::lock_guard lk(g_CsM);auto it=g_DepthCs.find(cs);if(it!=g_DepthCs.end()){candidate=it->second;found=true;}}
+        if(found && candidate.viewCb>=0){
+            unsigned frame=0;int eye=EyeOfDispatch(c,candidate.viewCb,frame,nullptr);
+            ID3D11Buffer* cb=nullptr;c->CSGetConstantBuffers(candidate.viewCb,1,&cb);float m[16]{};
+            uint64_t serial=0;if(cb){if(ViewMatrixOf(c,cb,m))serial=ViewMatrixHook::SerialOfViewMatrix(m);cb->Release();}
+            float projection[16]{},jitter[2]{};bool known=false;
+            {std::lock_guard lk(g_VM);unsigned long long newest=0;for(const auto& rec:g_Ring)
+                if(rec.seq>newest && rec.frame==frame && rec.eye==eye){newest=rec.seq;memcpy(projection,rec.projection,64);memcpy(jitter,rec.jitter,8);known=true;}}
+#ifdef DVR_HAS_PDAFW
+            if(taa&&known)AfwLive::Matrices(serial,eye,m,projection,jitter);
+#endif
+            if(taa&&known&&DlssLive::Enabled()&&VRRuntime::Stereo()&&!ScreenMode::FlatRender()&&g_Mode.load()==1&&t.colorSrv>=0&&t.mvSrv>=0&&t.resultUav>=0){
+                ID3D11ShaderResourceView *color=nullptr,*motion=nullptr;ID3D11UnorderedAccessView* result=nullptr;
+                c->CSGetShaderResources(t.colorSrv,1,&color);c->CSGetShaderResources(t.mvSrv,1,&motion);c->CSGetUnorderedAccessViews(t.resultUav,1,&result);
+                float resolution[2]{};ID3D11Buffer* scaleCb=nullptr;c->CSGetConstantBuffers(candidate.viewCb,1,&scaleCb);
+                const bool hasScale=scaleCb&&DlssResolution(c,scaleCb,resolution);if(scaleCb)scaleCb->Release();
+                if(DlssLive::Quality()==0||hasScale)p.dlssBatch=DlssLive::Capture(c,serial,eye,jitter,color,motion,result,DlssLive::Quality()>0?resolution:nullptr);
+                if(color)color->Release();if(motion)motion->Release();if(result)result->Release();
+            }
+            for(const auto& binding:candidate.bindings){
+                int component=-1;
+                if(taa && binding.name=="ro_viewcolormap")component=0;
+                if(taa && binding.name=="ro_motionvectors")component=1;
+                if(binding.name=="ro_downsampling_depthbuffer")component=2;
+                if(component<0)continue;
+                ID3D11ShaderResourceView* srv=nullptr;c->CSGetShaderResources(binding.slot,1,&srv);
+                if(srv){ID3D11Resource* resource=nullptr;srv->GetResource(&resource);
+                    if(known&&TemporalCapture::Active())TemporalCapture::Observe(c,component,resource,serial,eye,m,projection,jitter);
+                    if(component==2)DlssLive::ObserveDepth(c,serial,eye,resource);
+                    if(resource)resource->Release();srv->Release();}
+            }
+        }
+    }
+    if(g_DepthAudit.load()>0){
+        TaaCs candidate;bool found=false;
+        {std::lock_guard lk(g_CsM);auto it=g_DepthCs.find(cs);if(it!=g_DepthCs.end()){candidate=it->second;found=true;}}
+        if(found && g_DepthAudit.fetch_sub(1)>0){
+            unsigned frame=0;std::string why;int eye=-1;unsigned long long serial=0;
+            if(candidate.viewCb>=0){
+                eye=EyeOfDispatch(c,candidate.viewCb,frame,&why);
+                ID3D11Buffer* cb=nullptr;c->CSGetConstantBuffers(candidate.viewCb,1,&cb);
+                float m[16]{};if(cb){if(ViewMatrixOf(c,cb,m))serial=ViewMatrixHook::SerialOfViewMatrix(m);cb->Release();}
+            }
+            std::lock_guard lk(g_PM);
+            LOGI("depthinputs: cs {} serial {} frame {} eye {} context {} indirect {} groups {}x{}x{} reason {}",
+                 Hash(cs),serial,frame,eye,kind,indirect,x,y,z,why);
+            for(const auto& binding:candidate.bindings){
+                if(binding.type==D3D_SIT_TEXTURE){
+                    ID3D11ShaderResourceView* v=nullptr;c->CSGetShaderResources(binding.slot,1,&v);
+                    D3D11_SHADER_RESOURCE_VIEW_DESC desc{};if(v)v->GetDesc(&desc);
+                    LOGI("depthinputs: {} t{} {} viewFormat {} viewDimension {}",binding.name,binding.slot,ViewRes(v),int(desc.Format),int(desc.ViewDimension));
+                    if(v)v->Release();
+                }else if(binding.type==D3D_SIT_UAV_RWTYPED){
+                    ID3D11UnorderedAccessView* v=nullptr;c->CSGetUnorderedAccessViews(binding.slot,1,&v);
+                    LOGI("depthinputs: {} u{} {}",binding.name,binding.slot,ViewRes(v));if(v)v->Release();
+                }
+            }
+        }
+    }
+    if (taa && g_TemporalAudit.load() > 0 && g_TemporalAudit.fetch_sub(1) > 0)
+    {
+        unsigned frame=0; std::string why;
+        const int eye=EyeOfDispatch(c,t.viewCb,frame,&why);
+        float m[16]{}; unsigned long long serial=0;
+        ID3D11Buffer* cb=nullptr;c->CSGetConstantBuffers(t.viewCb,1,&cb);
+        if(cb){if(StereoTaa::ViewMatrixOf(c,cb,m))serial=ViewMatrixHook::SerialOfViewMatrix(m);cb->Release();}
+        float jitter[2]{}; bool jitterKnown=false;
+        { std::lock_guard lk(g_VM); for(const auto& rec:g_Ring)if(rec.seq && rec.frame==frame && rec.eye==eye){
+            memcpy(jitter,rec.jitter,sizeof(jitter));jitterKnown=true;break;
+        } }
+        LOGI("temporalinputs: serial {} frame {} eye {} context {} indirect {} groups {}x{}x{} jitterKnown {} nativeJitter ({:.9f},{:.9f}) reason {}",
+             serial,frame,eye,kind,indirect,x,y,z,jitterKnown,jitter[0],jitter[1],why);
+        // This is a bounded metadata audit, never an inferred depth selection.
+        std::lock_guard lk(g_PM);
+        for(const auto& binding:t.bindings){
+            if(binding.type==D3D_SIT_TEXTURE){
+                ID3D11ShaderResourceView* v=nullptr;c->CSGetShaderResources(binding.slot,1,&v);
+                LOGI("temporalinputs: {} t{} {}",binding.name,binding.slot,ViewRes(v));if(v)v->Release();
+            }else if(binding.type==D3D_SIT_UAV_RWTYPED){
+                ID3D11UnorderedAccessView* v=nullptr;c->CSGetUnorderedAccessViews(binding.slot,1,&v);
+                LOGI("temporalinputs: {} u{} {}",binding.name,binding.slot,ViewRes(v));if(v)v->Release();
+            }
+        }
+    }
     if (cs) cs->Release();
     if (!taa) return;
+    if(kind==1&&!indirect&&!DlssLive::Enabled())TemporalBoundary::SplitBefore(c);
     g_Dispatches++;
     {   // which main view this TAA pass belongs to: the last one recorded before a Present is the image being presented
         // (VRRuntime checks its frame-order rule against it). A still camera repeats a matrix: the newest match is taken.
@@ -1100,11 +1262,12 @@ void StereoTaa::OnDispatch(ID3D11DeviceContext* c, int kind, unsigned x, unsigne
 
 void StereoTaa::AfterPass(ID3D11DeviceContext* c, int kind, Pass& p)
 {
-    if (p.what != 1) return;
+    if (p.what != 1) {DlssLive::Finish(c,p.dlssBatch);p.dlssBatch=nullptr;return;}
     if (p.srvSlot >= 0) { c->CSSetShaderResources(p.srvSlot, 1, &p.savedSrv); if (p.savedSrv) p.savedSrv->Release(); }
     if (p.keep && p.out) c->CopyResource(p.keep, p.out);   // what this eye's TAA wrote is its history next time
     if (p.keep) p.keep->Release();
     if (p.out) p.out->Release();
+    DlssLive::Finish(c,p.dlssBatch);
     p = Pass();
 }
 
@@ -1116,10 +1279,11 @@ void StereoTaa::OnCopy(ID3D11DeviceContext* c, int kind, ID3D11Resource* dst, ID
 }
 
 void StereoTaa::OnPresent(IDXGISwapChain* sc)
-{
+{ DVR_PROFILE("StereoTaa.StereoTaa::OnPresent");
     ID3D11Device* dev = nullptr;
     if (sc && SUCCEEDED(sc->GetDevice(__uuidof(ID3D11Device), (void**)&dev)) && dev)
     {
+        SceneFoveation::OnPresent(dev);
         {   // the eyes' history textures: made (or remade) here, never from a recording thread
             std::lock_guard lk(g_HM);
             const bool active = g_Mode.load() == 1 && VRRuntime::Stereo() && !ScreenMode::FlatRender();   // the menu screen renders mono
@@ -1142,6 +1306,7 @@ void StereoTaa::OnPresent(IDXGISwapChain* sc)
             }
         }
         DumpPresent(dev);
+        TemporalCapture::Poll(dev); GpuListTiming::Poll(dev); DlssLive::OnPresent(dev);
         {   // the safety net (see g_FellBack)
             const bool active = g_Mode.load() == 1 && VRRuntime::Stereo() && !ScreenMode::FlatRender();   // the menu screen renders mono
             if (!VRRuntime::Stereo() && g_FellBack) { g_FellBack = false; ApplySkip(false); }
@@ -1203,6 +1368,67 @@ bool StereoTaa::KeepTaaInStereo() { return g_Mode.load() != 0; }
 
 bool StereoTaa::Command(const std::string& what, std::istringstream& ss)
 {
+    if (what == "temporalcapture" || what == "temporalpair" || what == "temporaltriple") {
+        std::string tag="inputs";ss>>tag;
+        if(tag.empty() || tag.size()>64 || tag.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=std::string::npos){LOGI("temporalcapture: invalid tag");return true;}
+        TemporalCapture::Request(GameInfo::GameDir()+L"\\DVR_temporal_"+std::wstring(tag.begin(),tag.end()),what=="temporaltriple"?3:what=="temporalpair"?2:1);
+        LOGI("temporalcapture: requested {} (diagnostic readback, exclude from performance samples)",tag);return true;
+    }
+    if (what == "depthinputs") {
+        int count=32;ss>>count;count=std::clamp(count,1,128);g_DepthAudit=count;
+        LOGI("depthinputs: armed {} candidate dispatches; names are discovery hints, not verified depth",count);
+        return true;
+    }
+    if (what == "temporalinputs") {
+        int count=8;ss>>count;count=std::clamp(count,1,32);g_TemporalAudit=count;
+        LOGI("temporalinputs: armed {} dispatches; resource metadata only, no rendering change",count);
+        return true;
+    }
+    if(what=="upscaleinputs"){int count=8;ss>>count;g_UpscaleAudit=std::clamp(count,1,32);LOGI("upscaleinputs armed {}",g_UpscaleAudit.load());return true;}
+    if(what=="dlssdirectcolor"){int on=0;ss>>on;DlssLive::SetDirectColor(on!=0);LOGI("DLSS direct temporal colour {}",on!=0);return true;}
+    if(what=="cpuprofile"){
+        std::string tag;int seconds=20;unsigned stride=16;int detailed=0;ss>>tag>>seconds>>stride>>detailed;
+        if(tag.empty()||tag.size()>64||tag.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=std::string::npos)return true;
+        const bool ok=FrameProfile::Request(GameInfo::GameDir()+L"\\DVR_cpu_"+std::wstring(tag.begin(),tag.end())+L".csv",seconds,stride,detailed!=0);
+        LOGI("CPU profiling {}: {} seconds, epoch sampling stride {}",ok?"started":"busy",seconds,stride);return true;
+    }
+    if(what=="dlssprofile"){
+        std::string tag;int seconds=20;ss>>tag>>seconds;
+        if(tag.empty()||tag.size()>64||tag.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=std::string::npos)return true;
+        DlssStageTiming::Request(GameInfo::GameDir()+L"\\DVR_dlss_"+std::wstring(tag.begin(),tag.end())+L".csv",seconds);
+        LOGI("DLSS stage GPU timing requested: {} seconds {}",tag,seconds);return true;
+    }
+    if(what=="dlsspreset"){
+        unsigned value=0;ss>>value;if(value!=0&&value!=11){LOGI("dlsspreset: 0 runtime default, 11 K; diagnostic comparison only");return true;}
+        DlssLive::SetPreset(value);LOGI("DLSS requested preset {} (quality mode unchanged)",value);return true;
+    }
+#ifdef DVR_HAS_PDAFW
+    if(what=="afwidentity"){int on=0;ss>>on;AfwInputs::SetIdentityFastPath(on!=0);LOGI("AFW identity adapter bypass {}",on!=0);return true;}
+    if(what=="afwstatus"){LOGI("{}",AfwLive::Status());return true;}
+    if(what=="afw"){
+        int on=0;ss>>on;if(on<0||on>5){LOGI("afw: 0 native, 1 DLAA, 2 Quality, 3 Balanced, 4 Performance, 5 Ultra Performance");return true;}AfwLive::Enable(on!=0);
+        const float scales[]={0,0,2.f/3.f,.58f,.5f,1.f/3.f};RenderRes::SetTemporalScale(scales[on]);DlssLive::SetQuality(on?on-1:0);DlssLive::SetEnabled(on!=0);
+        VRRuntime::NoteStereoCommand();StereoTaa::OnStereoChange(true);StereoSync::SetActive(on==0);VRRuntime::SetStereo(on!=0);
+        LOGI("AFW diagnostic mode {}: one fresh scene per submission; native fallback after missing data",on);return true;
+    }
+#endif
+    if(what=="dlsssr"){
+        int q=0;ss>>q;if(q<0||q>4){LOGI("dlsssr: 0 off, 1 Quality, 2 Balanced, 3 Performance, 4 Ultra Performance");return true;}
+        DlssLive::SetQuality(q);DlssLive::SetEnabled(q!=0);
+        const float scales[]={0.f,2.f/3.f,0.58f,0.5f,1.f/3.f};RenderRes::SetTemporalScale(scales[q]);
+        LOGI("DLSS SR diagnostic requested quality {} (actual viewport is verified at tonemap)",q);return true;
+    }
+    if (what == "dlsslive") {int on=0;ss>>on;if(on&&CVars::GetInt("rs_enable",0)!=0){LOGI("dlsslive refused: DLAA diagnostic requires full-resolution rendering; restore dynamicresprobe 0 first");return true;}DlssLive::SetQuality(0);DlssLive::SetEnabled(on!=0);if(!on)RenderRes::SetTemporalScale(0);LOGI("{}",DlssLive::Status());return true;}
+    if(what=="dlsscompact"){int on=1;ss>>on;DlssLive::SetCompactInputs(on!=0);return true;}
+    if(what=="dlssfullscreenscan"){int on=1;ss>>on;DlssLive::SetFullscreenScan(on!=0);return true;}
+    if (what == "dlssstatus") {const auto status=DlssLive::Status();LOGI("{} | {}",status,TemporalBoundary::Status());std::ofstream f(GameInfo::GameDir()+L"\\DVR_dlssstatus.txt");f<<status;return true;}
+    if (what == "temporalboundary") {int on=0;ss>>on;TemporalBoundary::SetEnabled(on!=0);LOGI("{}",TemporalBoundary::Status());return true;}
+    if (what == "gpulisttiming") {
+        std::string tag;int seconds=30;ss>>tag>>seconds;
+        if(tag.empty()||tag.size()>64||tag.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=std::string::npos)return true;
+        GpuListTiming::Request(GameInfo::GameDir()+L"\\DVR_gpu_"+std::wstring(tag.begin(),tag.end())+L".csv",seconds);
+        LOGI("GPU command-list timing requested: {} seconds {}",tag,seconds);return true;
+    }
     if (what == "aaprobe")
     {
         int n = 2; std::string mode; ss >> n >> mode;

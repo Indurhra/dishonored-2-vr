@@ -1,5 +1,7 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "RenderRes.h"
+#include "DlssLive.h"
 #include "GameInfo.h"
 #include "CVars.h"
 #include "CameraHook.h"
@@ -42,6 +44,8 @@ namespace
     std::string g_Why = "starting";
     unsigned long long g_Applies = 0, g_Spoofed = 0, g_Buffers = 0, g_CfgGuards = 0, g_PlaceGuards = 0;
     int g_BufW = 0, g_BufH = 0;                     // the swapchain's buffers, last seen
+    std::atomic<float> g_DynamicProbe{0};std::atomic<bool> g_DlssScaleOwned{false};
+    bool g_ProbeSaved=false;int g_ProbeEnable=0,g_ProbeHw=0,g_ProbeSkip=0;float g_ProbeX=0,g_ProbeY=0;
     int g_RsSaved = -1;                             // rs_enable as the game had it before the mod held it off
     // Present rate, for measuring what the resolution costs
     LARGE_INTEGER g_FpsT{}; int g_FpsN = 0; float g_Fps = 0.f;
@@ -260,6 +264,21 @@ namespace
     {
         const uintptr_t a = CVars::Address("rs_enable");
         if (!a) return;
+        if(g_DlssScaleOwned&&!DlssLive::Enabled()){g_DynamicProbe=0;g_DlssScaleOwned=false;}
+        const float probe=g_DynamicProbe.load();
+        if(probe>0 && hold){
+            if(!g_ProbeSaved){
+                for(const char* key:{"rs_forceFractionX","rs_forceFractionY","rs_useHwUpsample","rs_skipUpsample"})if(!CVars::Address(key)){g_DynamicProbe=0;LOGI("dynamicresprobe refused: missing {}",key);return;}
+                g_ProbeEnable=CVars::GetInt("rs_enable");g_ProbeHw=CVars::GetInt("rs_useHwUpsample");g_ProbeSkip=CVars::GetInt("rs_skipUpsample");
+                g_ProbeX=CVars::GetFloat("rs_forceFractionX");g_ProbeY=CVars::GetFloat("rs_forceFractionY");g_ProbeSaved=true;
+            }
+            CVars::SetInt("rs_enable",3);CVars::SetInt("rs_useHwUpsample",0);CVars::SetInt("rs_skipUpsample",0);
+            CVars::SetFloat("rs_forceFractionX",probe);CVars::SetFloat("rs_forceFractionY",probe);return;
+        }
+        if(g_ProbeSaved){
+            CVars::SetInt("rs_enable",g_ProbeEnable);CVars::SetInt("rs_useHwUpsample",g_ProbeHw);CVars::SetInt("rs_skipUpsample",g_ProbeSkip);
+            CVars::SetFloat("rs_forceFractionX",g_ProbeX);CVars::SetFloat("rs_forceFractionY",g_ProbeY);g_ProbeSaved=false;
+        }
         const int v = *(int*)(a + 0x28);
         if (hold)
         {
@@ -273,6 +292,8 @@ namespace
         }
     }
 }
+
+void RenderRes::SetTemporalScale(float scale){g_DynamicProbe=scale;g_DlssScaleOwned=scale>0;}
 
 void RenderRes::Install()
 {
@@ -314,7 +335,7 @@ void RenderRes::OnResizeBuffers(IDXGISwapChain*, UINT& w, UINT& h)
 }
 
 void RenderRes::OnPresent(IDXGISwapChain* sc)
-{
+{ DVR_PROFILE("RenderRes.RenderRes::OnPresent");
     if (!g_Installed) return;
     if (!g_Hwnd) { DXGI_SWAP_CHAIN_DESC d{}; if (SUCCEEDED(sc->GetDesc(&d))) g_Hwnd = d.OutputWindow; if (!g_Hwnd) return; }
     {
@@ -377,6 +398,12 @@ std::string RenderRes::Status()
 
 bool RenderRes::Command(const std::string& what, std::istringstream& ss)
 {
+    if(what=="dynamicresprobe"){
+        float scale=0;ss>>scale;
+        if(!std::isfinite(scale)||(scale!=0&&(scale<0.25f||scale>1.f))){LOGI("dynamicresprobe: use 0 to restore, or 0.25..1 to inspect engine resolution scaling");return true;}
+        if(scale>0&&DlssLive::Enabled())DlssLive::SetEnabled(false);
+        g_DlssScaleOwned=false;g_DynamicProbe=scale;LOGI("dynamicresprobe requested {:.4f}; diagnostic only, not a DLSS quality mode",scale);return true;
+    }
     if (what == "rendersize")
     {   // vr rendersize auto | off | <w> <h>
         std::string a; ss >> a; int h = 0; ss >> h;

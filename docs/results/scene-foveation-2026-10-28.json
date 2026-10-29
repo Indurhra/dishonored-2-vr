@@ -1,0 +1,182 @@
+{
+  "fov2_control_native": {
+    "quality_flags": [],
+    "seconds": 16.075042963027954,
+    "stereo_fps": 56.85832393121241,
+    "ms_per_pair": 17.587574357798637,
+    "delta": {
+      "presents": 1828,
+      "native": 914,
+      "fresh": 0,
+      "rebuilt": 0,
+      "accepted": 0,
+      "refused": 0,
+      "taa": 1828,
+      "held": 914
+    },
+    "private_bytes_mean": 9903763456,
+    "movement": 0
+  },
+  "fov2_control_quality": {
+    "quality_flags": [],
+    "seconds": 16.090956926345825,
+    "stereo_fps": 91.23136720330376,
+    "ms_per_pair": 10.961142320399063,
+    "delta": {
+      "presents": 1468,
+      "native": 0,
+      "fresh": 1468,
+      "rebuilt": 1468,
+      "accepted": 1468,
+      "refused": 0,
+      "taa": 1468,
+      "held": 0
+    },
+    "private_bytes_mean": 11193538921.411764,
+    "movement": 0
+  },
+  "fov2_off_quality": {
+    "quality_flags": [],
+    "seconds": 16.06991195678711,
+    "stereo_fps": 99.68940740359172,
+    "ms_per_pair": 10.031156027956998,
+    "delta": {
+      "presents": 1602,
+      "native": 0,
+      "fresh": 1602,
+      "rebuilt": 1602,
+      "accepted": 1602,
+      "refused": 0,
+      "taa": 1602,
+      "held": 0
+    },
+    "private_bytes_mean": 11414513302.588236,
+    "movement": 0
+  },
+  "fov2_on_native": {
+    "quality_flags": [],
+    "seconds": 16.076714992523193,
+    "stereo_fps": 52.311681857339906,
+    "ms_per_pair": 19.116189051751718,
+    "delta": {
+      "presents": 1682,
+      "native": 841,
+      "fresh": 0,
+      "rebuilt": 0,
+      "accepted": 0,
+      "refused": 0,
+      "taa": 1682,
+      "held": 841
+    },
+    "private_bytes_mean": 9886966482.82353,
+    "movement": 0
+  },
+  "fov2_on_quality": {
+    "quality_flags": [],
+    "seconds": 16.096128940582275,
+    "stereo_fps": 88.71698314988413,
+    "ms_per_pair": 11.271798977998792,
+    "delta": {
+      "presents": 1428,
+      "native": 0,
+      "fresh": 1428,
+      "rebuilt": 1428,
+      "accepted": 1428,
+      "refused": 0,
+      "taa": 1428,
+      "held": 0
+    },
+    "private_bytes_mean": 11150941003.294117,
+    "movement": 0
+  },
+  "fov3_control_quality": {
+    "quality_flags": [],
+    "seconds": 16.07706904411316,
+    "stereo_fps": 88.94656084864015,
+    "ms_per_pair": 11.242705625253958,
+    "delta": {
+      "presents": 1430,
+      "native": 0,
+      "fresh": 1430,
+      "rebuilt": 1430,
+      "accepted": 1430,
+      "refused": 0,
+      "taa": 1430,
+      "held": 0
+    },
+    "private_bytes_mean": 11180671698.82353,
+    "movement": 0
+  },
+  "fov3_on_quality": {
+    "quality_flags": [],
+    "seconds": 16.106462001800537,
+    "stereo_fps": 77.91903646248964,
+    "ms_per_pair": 12.833834264382899,
+    "delta": {
+      "presents": 1255,
+      "native": 0,
+      "fresh": 1255,
+      "rebuilt": 1255,
+      "accepted": 1255,
+      "refused": 0,
+      "taa": 1255,
+      "held": 0
+    },
+    "private_bytes_mean": 11278001091.764706,
+    "movement": 0
+  },
+  "fov4_batch_quality": {
+    "quality_flags": [],
+    "seconds": 16.103148937225342,
+    "stereo_fps": 90.78969620782198,
+    "ms_per_pair": 11.014465757336074,
+    "delta": {
+      "presents": 1462,
+      "native": 0,
+      "fresh": 1462,
+      "rebuilt": 1462,
+      "accepted": 1462,
+      "refused": 0,
+      "taa": 1462,
+      "held": 0
+    },
+    "private_bytes_mean": 11125644589.17647,
+    "movement": 0
+  },
+  "fov4_off_quality": {
+    "quality_flags": [],
+    "seconds": 16.059272050857544,
+    "stereo_fps": 97.88737590481614,
+    "ms_per_pair": 10.215821915303781,
+    "delta": {
+      "presents": 1572,
+      "native": 0,
+      "fresh": 1572,
+      "rebuilt": 1572,
+      "accepted": 1572,
+      "refused": 0,
+      "taa": 1572,
+      "held": 0
+    },
+    "private_bytes_mean": 11224724178.82353,
+    "movement": 0
+  },
+  "fov_control_quality": {
+    "quality_flags": [],
+    "seconds": 17.095409870147705,
+    "stereo_fps": 91.0770792760494,
+    "ms_per_pair": 10.979710899259926,
+    "delta": {
+      "presents": 1557,
+      "native": 0,
+      "fresh": 1557,
+      "rebuilt": 1557,
+      "accepted": 1557,
+      "refused": 0,
+      "taa": 1557,
+      "held": 0
+    },
+    "private_bytes_mean": 11128741165.17647,
+    "movement": 0
+  }
+}

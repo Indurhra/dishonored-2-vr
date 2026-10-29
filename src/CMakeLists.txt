@@ -57,6 +57,7 @@ target_link_options(dinput8 PRIVATE "/PDBALTPATH:dinput8.pdb")
 
 # --- the mod ---
 set(MOD_SOURCES
+    Src/FrameProfile.cpp Src/FrameProfile.h
     Src/Main.cpp
     Src/Log.cpp        Src/Log.h
     Src/GameInfo.cpp   Src/GameInfo.h
@@ -68,6 +69,10 @@ set(MOD_SOURCES
     Src/Overlay.cpp    Src/Overlay.h
     Src/WristHud.cpp   Src/WristHud.h
     Src/StereoTaa.cpp  Src/StereoTaa.h
+    Src/TemporalCapture.cpp Src/TemporalCapture.h
+    Src/GpuListTiming.cpp Src/GpuListTiming.h
+    Src/TemporalBoundary.cpp Src/TemporalBoundary.h
+    Src/DlssLive.cpp Src/DlssLive.h Src/DlssStageTiming.cpp Src/DlssStageTiming.h
     Src/StereoSync.cpp Src/StereoSync.h
     Src/LiveWheel.cpp Src/LiveWheel.h Src/WheelSelection.h
     Src/WheelRenderer.cpp Src/WheelRenderer.h Src/WheelModel.h
@@ -118,7 +123,7 @@ target_precompile_headers(DishonoredVR PRIVATE Src/pch.h)
 target_link_libraries(DishonoredVR PRIVATE
     fmt::fmt imgui::imgui OpenXR::openxr_loader
     Detours::Detours
-    d3d11 dxgi version windowscodecs shell32 ole32)
+    d3d11 dxgi version windowscodecs shell32 ole32 advapi32)
 set_target_properties(DishonoredVR PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${OUT_DIR}" RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OUT_DIR}")
 target_link_options(DishonoredVR PRIVATE "/PDBALTPATH:DishonoredVR.pdb")   # (see dinput8 above)
@@ -133,3 +138,95 @@ endif()
 
 add_executable(dvr_psvr2_bridge Psvr2/Bridge.cpp)
 set_target_properties(dvr_psvr2_bridge PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OUT_DIR}")
+
+# Optional native D3D11 NGX backend. SDK stays local and is never vendored.
+set(DVR_NGX_ROOT "" CACHE PATH "Path to the pinned NVIDIA NGX SDK")
+if(DVR_NGX_ROOT)
+    if(NOT EXISTS "${DVR_NGX_ROOT}/include/nvsdk_ngx.h" OR NOT EXISTS "${DVR_NGX_ROOT}/lib/Windows_x86_64/x64/nvsdk_ngx_s.lib")
+        message(FATAL_ERROR "DVR_NGX_ROOT must contain the SDK headers and static-CRT x64 library")
+    endif()
+    add_library(dvr_dlss_backend STATIC Src/DlssD3D11.cpp)
+    target_include_directories(dvr_dlss_backend PUBLIC Src PRIVATE "${DVR_NGX_ROOT}/include")
+    target_link_libraries(dvr_dlss_backend PUBLIC d3d11 dxgi "${DVR_NGX_ROOT}/lib/Windows_x86_64/x64/nvsdk_ngx_s.lib")
+    target_link_libraries(DishonoredVR PRIVATE dvr_dlss_backend)
+    target_compile_definitions(DishonoredVR PRIVATE DVR_HAS_NGX=1)
+endif()
+add_executable(temporal_frame_test ../tests/temporal_frame_test.cpp)
+target_include_directories(temporal_frame_test PRIVATE Src)
+enable_testing()
+add_test(NAME temporal_frame_contract COMMAND temporal_frame_test)
+if(DVR_NGX_ROOT)
+    add_executable(dlss_backend_smoke ../tests/dlss_backend_smoke.cpp)
+    target_link_libraries(dlss_backend_smoke PRIVATE dvr_dlss_backend)
+endif()
+
+if(DVR_NGX_ROOT)
+    add_executable(dlss_capture_replay ../tests/dlss_capture_replay.cpp)
+    target_link_libraries(dlss_capture_replay PRIVATE dvr_dlss_backend)
+endif()
+add_library(dvr_afw_backend STATIC Src/AfwD3D11.cpp)
+target_include_directories(dvr_afw_backend PUBLIC Src)
+target_link_libraries(dvr_afw_backend PUBLIC d3d11 d3dcompiler)
+add_executable(afw_backend_smoke ../tests/afw_backend_smoke.cpp)
+target_link_libraries(afw_backend_smoke PRIVATE dvr_afw_backend)
+add_executable(afw_capture_replay ../tests/afw_capture_replay.cpp)
+target_link_libraries(afw_capture_replay PRIVATE dvr_afw_backend)
+add_executable(temporal_boundary_smoke ../tests/temporal_boundary_smoke.cpp Src/TemporalBoundary.cpp)
+target_include_directories(temporal_boundary_smoke PRIVATE Src)
+target_link_libraries(temporal_boundary_smoke PRIVATE d3d11 d3dcompiler)
+
+if(DVR_NGX_ROOT)
+    add_executable(dlss_live_smoke ../tests/dlss_live_smoke.cpp Src/DlssLive.cpp Src/TemporalBoundary.cpp Src/DlssStageTiming.cpp)
+    target_compile_definitions(dlss_live_smoke PRIVATE DVR_HAS_NGX=1)
+    target_link_libraries(dlss_live_smoke PRIVATE dvr_dlss_backend d3dcompiler OpenXR::openxr_loader)
+endif()
+
+add_executable(dlss_stage_timing_smoke ../tests/dlss_stage_timing_smoke.cpp Src/DlssStageTiming.cpp)
+target_include_directories(dlss_stage_timing_smoke PRIVATE Src)
+target_link_libraries(dlss_stage_timing_smoke PRIVATE d3d11)
+
+set(DVR_PDAFW_INCLUDE "" CACHE PATH "Local public PureDark AFW ABI header for optional live backend and probes")
+if(DVR_PDAFW_INCLUDE)
+    add_executable(puredark_afw_probe ../tools/puredark_afw_probe.cpp)
+    target_include_directories(puredark_afw_probe PRIVATE "${DVR_PDAFW_INCLUDE}")
+    target_link_libraries(puredark_afw_probe PRIVATE d3d11 d3d12 dxgi)
+endif()
+if(DVR_PDAFW_INCLUDE)
+    add_library(dvr_puredark_backend STATIC Src/AfwPlugin.cpp)
+    target_include_directories(dvr_puredark_backend PUBLIC Src PRIVATE "${DVR_PDAFW_INCLUDE}")
+    target_link_libraries(dvr_puredark_backend PUBLIC d3d11 d3d12 dxgi)
+endif()
+if(DVR_PDAFW_INCLUDE)
+    add_executable(puredark_backend_smoke ../tests/puredark_backend_smoke.cpp)
+    target_link_libraries(puredark_backend_smoke PRIVATE dvr_puredark_backend)
+endif()
+
+if(DVR_PDAFW_INCLUDE AND DVR_NGX_ROOT)
+    target_sources(DishonoredVR PRIVATE Src/AfwLive.cpp Src/AfwInputs.cpp)
+    target_compile_definitions(DishonoredVR PRIVATE DVR_HAS_PDAFW=1)
+    target_link_libraries(DishonoredVR PRIVATE dvr_puredark_backend)
+endif()
+add_executable(afw_inputs_smoke ../tests/afw_inputs_smoke.cpp Src/AfwInputs.cpp Src/DlssStageTiming.cpp)
+target_include_directories(afw_inputs_smoke PRIVATE Src)
+target_link_libraries(afw_inputs_smoke PRIVATE d3d11 d3dcompiler)
+
+target_compile_definitions(DishonoredVR PRIVATE DVR_FRAME_PROFILE=1)
+add_executable(frame_profile_smoke ../tests/frame_profile_smoke.cpp Src/FrameProfile.cpp)
+target_include_directories(frame_profile_smoke PRIVATE Src)
+target_compile_definitions(frame_profile_smoke PRIVATE DVR_FRAME_PROFILE=1)
+
+target_link_libraries(frame_profile_smoke PRIVATE d3d11 dxgi psapi)
+
+option(DVR_EXPERIMENTAL_SCENE_VRS "Build unaccepted scene VRS diagnostic" OFF)
+set(DVR_NVAPI_ROOT "" CACHE PATH "NVIDIA NVAPI SDK directory")
+target_sources(DishonoredVR PRIVATE Src/SceneFoveation.cpp)
+if(DVR_EXPERIMENTAL_SCENE_VRS AND DVR_NVAPI_ROOT)
+ target_compile_definitions(DishonoredVR PRIVATE DVR_HAS_NVAPI)
+ target_include_directories(DishonoredVR PRIVATE "${DVR_NVAPI_ROOT}")
+ target_link_libraries(DishonoredVR PRIVATE "${DVR_NVAPI_ROOT}/amd64/nvapi64.lib")
+endif()
+if(DVR_EXPERIMENTAL_SCENE_VRS AND DVR_NVAPI_ROOT)
+ add_executable(scene_vrs_driver_smoke ../tests/scene_vrs_driver_smoke.cpp)
+ target_include_directories(scene_vrs_driver_smoke PRIVATE "${DVR_NVAPI_ROOT}")
+ target_link_libraries(scene_vrs_driver_smoke PRIVATE d3d11 "${DVR_NVAPI_ROOT}/amd64/nvapi64.lib")
+endif()

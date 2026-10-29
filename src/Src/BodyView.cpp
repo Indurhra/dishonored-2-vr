@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "BodyView.h"
 #include "GpuTrace.h"
@@ -256,7 +257,7 @@ void BodyView::FovAutoOff()
 bool BodyView::FovAutoPending() { return g_FovAutoOn.load() && g_FovSet[0] <= 0.f; }
 
 void BodyView::OnPresent()
-{
+{ DVR_PROFILE("BodyView.BodyView::OnPresent");
     static unsigned n = 0;
     if (!g_FovAutoOn.load() || (n++ % 30) != 0) return;
     const bool was = g_FovSet[0] > 0.f;

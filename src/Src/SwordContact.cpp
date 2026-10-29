@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "SwordContact.h"
 #include "XRSession.h"
@@ -39,6 +40,7 @@ namespace
         float rearmHand = 0.7f;
         float rearm = 0.35f;                  // and the same entity is not struck again before this
         float maxDim = 2.4f, maxVol = 1.2f;   // a box bigger than this is furniture / architecture, not a target
+        float earlyDistance = 0; // Diagnostic A/B: reject distant entities before weapon-ownership lookup.
         float radius = 3.0f, scanSec = 0.10f; // targets: entities within this of the eye, refreshed this often
         float skelMin = 20;                   // a skinned model with at least this many joints is struck by its skeleton
         float attach = 0.30f;                 // a box touched this close to a character's body (his sword, hat) strikes him too
@@ -61,7 +63,7 @@ namespace
         { "guard", &C.guard }, { "tip", &C.tip }, { "samples", &C.samples }, { "blader", &C.bladeR },
         { "hithand", &C.hitHand }, { "hitwin", &C.hitWin }, { "hitpath", &C.hitPath }, { "pathwin", &C.pathWin },
         { "minspeed", &C.minSpeed }, { "rearmhand", &C.rearmHand }, { "rearm", &C.rearm },
-        { "maxdim", &C.maxDim }, { "maxvol", &C.maxVol }, { "radius", &C.radius }, { "scan", &C.scanSec }, { "skelmin", &C.skelMin },
+        { "maxdim", &C.maxDim }, { "maxvol", &C.maxVol }, { "radius", &C.radius }, { "scan", &C.scanSec }, { "earlydistance", &C.earlyDistance }, { "skelmin", &C.skelMin },
         { "attach", &C.attach }, { "teleport", &C.teleport }, { "handjump", &C.handJump }, { "losthold", &C.lostHold },
         { "haptic", &C.haptic }, { "touchbuzz", &C.touchBuzz }, { "airdefer", &C.airDefer }, { "airmax", &C.airMax },
         { "early", &C.early }, { "pendmax", &C.pendMax }, { "strikewait", &C.strikeWait }, { "reclick", &C.reclick },
@@ -176,7 +178,7 @@ namespace
     //! model with a skeleton (a character, alive or dead) is struck by its bones; anything else by its box, unless that box
     //! is furniture-sized or the player stands in it (the body's own models).
     void ScanTargets(const float eye[3], bool log)
-    {
+    { DVR_PROFILE("SwordContact.ScanTargets");
         g_Targets.clear();
         uint8_t* game = nullptr;
         if (!SafeCopy(&game, (void*)(GameInfo::Base() + kGamePtr), 8) || !game) return;
@@ -199,14 +201,16 @@ namespace
             uint8_t hidden = 0; SafeCopy(&hidden, e + kEntHidden, 1);
             if (hidden & 1) continue;
             if (!RefreshPose(t)) continue;
+            const float d[3] = {t.org[0]-eye[0],t.org[1]-eye[1],t.org[2]-eye[2]};
+            const bool tooFar = Dot(d,d) > (C.radius+C.maxDim)*(C.radius+C.maxDim);
+            if(C.earlyDistance != 0 && tooFar) continue;
             if (const int wc = GpuTrace::WeaponClaim(t.org); wc >= 0)
             {   // drawn as part of a held weapon (its upgrades, the cartridge): the player's own
                 if (log) SafeCopy(&t.id, e + kEntId, 4);
                 if (log) LOGI("swordscan: ent {} id {:#x} vt exe+{:#x} at ({:.2f},{:.2f},{:.2f}) -- skipped: drawn with the {} hand's weapon", (void*)e, t.id, t.vt - GameInfo::Base(), t.org[0], t.org[1], t.org[2], wc ? "right" : "left");
                 continue;
             }
-            const float d[3] = { t.org[0] - eye[0], t.org[1] - eye[1], t.org[2] - eye[2] };
-            if (Dot(d, d) > (C.radius + C.maxDim) * (C.radius + C.maxDim)) continue;
+            if (tooFar) continue;
             if (!EntityBox(e, t.mn, t.mx)) continue;
             const float sx = t.mx[0] - t.mn[0], sy = t.mx[1] - t.mn[1], sz = t.mx[2] - t.mn[2];
             t.vol = sx * sy * sz;
@@ -448,7 +452,7 @@ bool SwordContact::DeferAirTap()
 }
 
 SwordContact::Out SwordContact::Tick(const XRInputState& in, bool active)
-{
+{ DVR_PROFILE("SwordContact.Tick");
     Out o;
     const double t = Now();
     auto awaitSlash = [&]() { g_AwaitSince = t; g_LastClick = t; g_AwaitSerial = MeleeAim::SlashSerial(); g_Reclicks = 0; };

@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "CameraHook.h"
 #include "GameInfo.h"
@@ -64,7 +65,7 @@ namespace
     }
 
     void* Hook(void* a, void* view, void* c, void* d)
-    {
+    { DVR_PROFILE("camera.update");
         // Signature: ComputeMatrices(constantBlock* rcx, RenderView* rdx) — the view object is the 2nd arg.
         uint8_t* rv = (uint8_t*)view + CameraHook::kRenderRV;
         float* org = (float*)(rv + CameraHook::kRV_ViewOrg);
@@ -150,7 +151,7 @@ namespace
     std::atomic<unsigned long long> g_FovOverrides{ 0 }, g_FlatWidened{ 0 }, g_ExplicitBuilds{ 0 };
     std::atomic<unsigned long long> g_EyeFovViews[2] = {};   // views built with a stereo eye's own fov (per-eye frustum, mode 1)
     void ProjHook(void* rv, float* out, float a, float b, void* e, int f, int g)
-    {
+    { DVR_PROFILE("camera.projection");
         uint8_t* mv = (uint8_t*)g_MainView.load();
         if (mv && rv == mv + CameraHook::kRenderRV && *((uint8_t*)rv + CameraHook::kRV_UseExplicit)) g_ExplicitBuilds++;
         if (mv && rv == mv + CameraHook::kRenderRV && !*((uint8_t*)rv + CameraHook::kRV_UseExplicit))

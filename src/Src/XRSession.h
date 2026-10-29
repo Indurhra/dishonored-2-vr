@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <string>
 
@@ -176,6 +177,9 @@ public:
     //! rendered with that eye's pose ±IPD/2 AND its native fov (matched-fov),
     //! so both map across the full lens. Call after BeginFrame() returned true.
     void SubmitFrameStereo(ID3D11Texture2D* eye0, ID3D11Texture2D* eye1);
+    bool SubmitReconstructedPair(ID3D11Texture2D* eye0, ID3D11Texture2D* eye1,
+        const float pose0[7],const float pose1[7],const float tan0[4],const float tan1[4],const float warp0[4],const float warp1[4]);
+
 
     //! Last swapchain image each eye was copied into (render thread only; valid
     //! while the session lives). For per-eye capture verification.
@@ -339,6 +343,8 @@ public:
     uint32_t EyeWidth() const { return m_EyeWidth; }
     uint32_t EyeHeight() const { return m_EyeHeight; }
     uint64_t FramesSubmitted() const { return m_FramesSubmitted; }
+    uint64_t FramesAccepted() const { return m_FramesAccepted; }
+    uint64_t NativePairsAccepted() const { return m_NativePairsAccepted; }
     const std::string& RuntimeName() const { return m_RuntimeName; }
     const std::string& SystemName() const { return m_SystemName; }
 
@@ -373,7 +379,7 @@ private:
     unsigned long long m_LocatesAhead = 0;
     int m_ViewCount = 0;
     uint32_t m_EyeWidth = 0, m_EyeHeight = 0;
-    uint64_t m_FramesSubmitted = 0;
+    uint64_t m_FramesSubmitted = 0, m_FramesAccepted = 0, m_NativePairsAccepted = 0;
     bool m_FrameStarted = false;
     bool m_ShouldRender = false;
     std::string m_LastError;

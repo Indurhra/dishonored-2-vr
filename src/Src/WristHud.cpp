@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "WristHud.h"
 #include "GpuTrace.h"
@@ -349,7 +350,7 @@ void WristHud::MirrorEnd(ID3D11DeviceContext* ctx, Mirror& m)
 }
 
 void WristHud::BeginPresent(IDXGISwapChain* sc)
-{
+{ DVR_PROFILE("WristHud.WristHud::BeginPresent");
     g_PresentThread = GetCurrentThreadId();
     g_InPresent = true;
     g_Frames++;
@@ -394,7 +395,7 @@ void WristHud::BeginPresent(IDXGISwapChain* sc)
 }
 
 void WristHud::EndPresent()
-{
+{ DVR_PROFILE("WristHud.WristHud::EndPresent");
     if (ID3D11RenderTargetView* r = g_Rtv.load(); r && g_Dev)
     {
         ID3D11DeviceContext* imm = nullptr; g_Dev->GetImmediateContext(&imm);
@@ -548,7 +549,7 @@ std::string WristHud::Config()
 }
 
 void WristHud::OnXrFrame(XRSession& xr, bool inMenu)
-{
+{ DVR_PROFILE("WristHud.WristHud::OnXrFrame");
     LARGE_INTEGER now, fq; QueryPerformanceCounter(&now); QueryPerformanceFrequency(&fq);
     std::lock_guard lk(g_WM);
     const float dt = g_LastT.QuadPart ? std::min(0.1f, (float)(now.QuadPart - g_LastT.QuadPart) / (float)fq.QuadPart) : 0.f;

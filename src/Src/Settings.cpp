@@ -19,6 +19,7 @@ namespace
     // the same defaults, except [Advanced] WriteStatusFile, which defaults to 1 here (a development setup has no ini)
     // and is 0 in the file the players get.
     const Key kKeys[] = {
+        { "display.renderer", Kind::Choice, "0", 0, 0, "0|1|2|3|4|5|6|7" },
         { "controls.turnmode",          Kind::Choice, "smooth", 0, 0, "smooth|snap" },
         { "controls.smoothturnspeed",   Kind::Float,  "120", 30, 360, nullptr },
         { "controls.snapturnangle",     Kind::Float,  "45", 10, 90, nullptr },
@@ -68,6 +69,7 @@ namespace
     };
 
     std::map<std::string, std::string> g_Val;     //!< validated values, every key present
+    std::atomic<int> g_RendererOverride{-1};
     bool g_FileFound = false;
     int g_Read = 0, g_Bad = 0;
 
@@ -200,6 +202,12 @@ std::vector<std::string> Settings::PackageCommands()
         if (st == "1" || st == "true" || st == "on" || st == "yes") c.push_back("vr stereo 2");   // both eyes of one instant
         else if (st == "2") c.push_back("vr stereo 1");                                              // alternating eyes
     }
+#ifdef DVR_HAS_PDAFW
+    const int renderer = g_RendererOverride.load();
+    const int selected = renderer >= 0 ? renderer : std::stoi(V("display.renderer"));
+    c.push_back("vr afw " + std::to_string(selected <= 5 ? selected : 0));
+    if (selected >= 6) c.push_back(selected == 6 ? "vr stereo 0" : "vr stereo 1");
+#endif
     // Camera motion blur smears the whole view each time the head-driven camera turns: off in VR (the game keeps it
     // in its own config afterwards, as if it had been unticked in the options).
     if (B("display.disablemotionblur")) c.push_back("exec r_skipCameraMotionBlur 1");
@@ -232,4 +240,14 @@ std::string Settings::Summary()
     std::string s = g_FileFound ? "DishonoredVR.ini:" : "defaults (no DishonoredVR.ini):";
     for (const Key& k : kKeys) s += fmt::format(" {}={}", strchr(k.name, '.') + 1, g_Val[k.name]);
     return s;
+}
+
+bool Settings::SaveRenderer(int mode)
+{
+    if (mode < 0 || mode > 7) return false;
+    const auto path = GameInfo::GameDir() + L"\\DishonoredVR.ini";
+    const auto value = std::to_wstring(mode);
+    if (!WritePrivateProfileStringW(L"Display", L"Renderer", value.c_str(), path.c_str())) return false;
+    g_RendererOverride = mode;
+    return true;
 }

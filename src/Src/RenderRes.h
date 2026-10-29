@@ -21,6 +21,7 @@
 namespace RenderRes
 {
     void Install();
+    void SetTemporalScale(float scale); // diagnostic DLSS SR owns/restores engine fractions
     //! From ResizeBuffers, before the real call: the size the buffers get (0 = the window's client size, DXGI's rule).
     void OnResizeBuffers(IDXGISwapChain* sc, UINT& w, UINT& h);
     //! Every Present, on the window's thread: works out the target and applies it when it changes.

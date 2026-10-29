@@ -1042,6 +1042,7 @@ MOCK_FN Mock_xrCreateAction(XrActionSet, const XrActionCreateInfo* ci, XrAction*
     *out = (XrAction)a;
     return XR_SUCCESS;
 }
+MOCK_FN Mock_xrDestroyAction(XrAction action) { if(!action)return XR_ERROR_HANDLE_INVALID; delete reinterpret_cast<MockAction*>(action); return XR_SUCCESS; }
 MOCK_FN Mock_xrSuggestInteractionProfileBindings(XrInstance, const XrInteractionProfileSuggestedBinding*) { return XR_SUCCESS; }
 MOCK_FN Mock_xrAttachSessionActionSets(XrSession, const XrSessionActionSetsAttachInfo*) { gProfileEventPending = true; return XR_SUCCESS; }
 MOCK_FN Mock_xrPathToString(XrInstance, XrPath path, uint32_t cap, uint32_t* count, char* buf)
@@ -1248,6 +1249,7 @@ extern "C" XRAPI_ATTR XrResult XRAPI_CALL Mock_xrGetInstanceProcAddr(XrInstance,
     BIND(xrCreateActionSet);
     BIND(xrDestroyActionSet);
     BIND(xrCreateAction);
+    BIND(xrDestroyAction);
     BIND(xrSuggestInteractionProfileBindings);
     BIND(xrAttachSessionActionSets);
     BIND(xrCreateActionSpace);

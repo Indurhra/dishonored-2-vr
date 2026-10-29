@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "SwordGesture.h"
 #include "XRSession.h"
@@ -166,7 +167,7 @@ void SwordGesture::Reset()
 }
 
 SwordGesture::Out SwordGesture::Tick(const XRInputState& in, bool triggerHeld, bool gripHeld)
-{
+{ DVR_PROFILE("SwordGesture.Tick");
     if (triggerHeld && !g_PrevTrigger) MeleeAim::ClearGestureAxis();   // a trigger swing aims with the controller
     g_PrevTrigger = triggerHeld;
     // Switched off while charging: the charge must be CANCELLED (a block pulse with the attack held), not let go --

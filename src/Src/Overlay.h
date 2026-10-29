@@ -12,6 +12,7 @@ namespace Overlay
     void OnResize(IDXGISwapChain* sc);    //!< release RTV before ResizeBuffers
     void Shutdown();
     bool Visible();
+    bool CaptureMenu(const std::wstring& path); // explicit diagnostic capture only
     bool ControllerInput(const XRInputState& input, double now);
     void ControllerLost();
     void Panel(XRSession& xr, float degrees, float distance);

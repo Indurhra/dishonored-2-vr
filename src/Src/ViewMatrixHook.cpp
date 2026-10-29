@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "ViewMatrixHook.h"
 #include "StereoSync.h"
@@ -13,6 +14,9 @@
 #include "BodyHide.h"
 #include "StereoTaa.h"
 #include "ScreenMode.h"
+#ifdef DVR_HAS_PDAFW
+#include "AfwLive.h"
+#endif
 #include <detours/detours.h>
 
 namespace
@@ -504,7 +508,7 @@ namespace
     }
 
     void Hook(const float* org, const float* axis, float* out)
-    {
+    { DVR_PROFILE("camera.view");
         { std::lock_guard lk(g_M); g_Stats.calls++; }
         // Main view = the object CameraHook identified (largest render size); its renderRV.vieworg
         // lives at view + 0x39D0 + 0xA8.
@@ -711,6 +715,29 @@ namespace
                 CameraHook::Tans tans; CameraHook::ApplyEyeProjection(mainView, viewEye, tans);   // mode 2 (research): its own matrix
                 StereoTaa::OnMainView(mainView, eye, out);    // each eye's own "previous frame" for the motion vectors
                 const unsigned long long serial = PublishView(o, a, out, &hp, g_KeepGameAxis.load(), org, false, sync ? 0 : syncOn ? -1 : -2, sync ? ~0ull : 0, &ps, &tans, canted, turn, headAxis);
+#ifdef DVR_HAS_PDAFW
+                if (AfwLive::Enabled() && !syncOn && eye>=0 && eye<2 && g_KeepGameAxis.load()) {
+                    const int other=eye^1;float off=0;CameraHook::Tans ot;float turnOther[4];
+                    if(ps.eye[other].valid && RoomYawOffset(off) && CameraHook::EyeTans(other,ot,turnOther)) {
+                        float delta[3],local[3],otherOrg[3],otherAxis[9],otherView[16];
+                        for(int k=0;k<3;++k)delta[k]=ps.eye[other].pos[k]-ps.eye[eye].pos[k];
+                        VRMath::XrToId(delta,local);const float c=cosf(off/kR2D),sn=sinf(off/kR2D),scale=g_Scale.load()*g_HostScale.load();
+                        otherOrg[0]=o[0]+(c*local[0]-sn*local[1])*scale;otherOrg[1]=o[1]+(sn*local[0]+c*local[1])*scale;otherOrg[2]=o[2]+local[2]*scale;
+                        // EyeAxis returning false can mean identity rotation, not an invalid camera.
+                        if(ps.head.valid) {
+                            memcpy(otherAxis,headAxis,sizeof(otherAxis));
+                            EyeAxis(headAxis,ps,other,turnOther,otherAxis);
+                            g_Real(otherOrg,otherAxis,otherView); // matrix only; never another scene render
+                            auto target=ViewMatrixHook::RenderPoseXr(serial);target.eye=other;memcpy(target.pos,ps.eye[other].pos,12);memcpy(target.warp,turnOther,16);
+                            target.tan[0]=ot.l;target.tan[1]=ot.r;target.tan[2]=ot.u;target.tan[3]=ot.d;target.tanValid=true;
+                            const float ca=cosf(-off/kR2D),sa=sinf(-off/kR2D);float xr[3][3];
+                            for(int k=0;k<3;++k){auto* v=otherAxis+3*k;float wx=ca*v[0]-sa*v[1],wy=sa*v[0]+ca*v[1];xr[k][0]=-wy;xr[k][1]=v[2];xr[k][2]=-wx;}
+                            float right[3]={-xr[1][0],-xr[1][1],-xr[1][2]},back[3]={-xr[0][0],-xr[0][1],-xr[0][2]};QuatFromCols(right,xr[2],back,target.quat);
+                            AfwLive::Target(serial,otherView,target);
+                        }
+                    }
+                }
+#endif
                 if (sync)
                 {
                     memcpy(g_Pair.gameOrg, org, 12); g_Pair.set = ps;
@@ -797,12 +824,13 @@ bool ViewMatrixHook::ViewPoses(unsigned long long serial, VRRuntime::PoseSet& ou
     if (v.serial != serial || !v.set.valid) return false;
     out = v.set; return true;
 }
-bool ViewMatrixHook::ViewBySerial(unsigned long long serial, float mat[16], float org[3], float axis[9])
+bool ViewMatrixHook::ViewBySerial(unsigned long long serial, float mat[16], float org[3], float axis[9], float* headAxis)
 {
     std::lock_guard lk(g_ViewM);
     const ViewGeo& g = g_GeoRing[serial % 16];
     if (!serial || g.serial != serial) return false;
     memcpy(mat, g.mat, 64); memcpy(org, g.org, 12); memcpy(axis, g.axis, 36);
+    if(headAxis)memcpy(headAxis,g.headAxis,36);
     return true;
 }
 unsigned long long ViewMatrixHook::SerialOfViewMatrix(const float m[16])

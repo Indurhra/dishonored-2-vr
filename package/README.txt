@@ -293,3 +293,12 @@ Support the development: patreon.com/CosmicTangerine  -  ko-fi.com/cosmictangeri
 ------------------------------------------------------------------------------------------------
  Third-party software in this mod: see THIRD-PARTY-NOTICES.txt.
 ------------------------------------------------------------------------------------------------
+
+RENDERER SELECTION
+The VR Rendering menu offers Native Stereo, AFW + DLSS (experimental), Mono
+(no stereo depth), and Alternating eyes (AER). Selecting an option does not switch
+immediately: press Apply renderer. The active mode is shown separately.
+AFW quality modes are DLAA, Quality, Balanced, Performance and Ultra Performance.
+Native Stereo remains the fallback. Single-pass stereo is not implemented.
+AFW requires compatible separately installed DLSS and AFW runtime dependencies;
+this source upload does not redistribute those proprietary runtime files.

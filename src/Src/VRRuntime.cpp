@@ -1,8 +1,16 @@
+#include "FrameProfile.h"
+#include "DlssLive.h"
+#include "RenderRes.h"
+#ifdef DVR_HAS_PDAFW
+#include "AfwLive.h"
+#include <wrl/client.h>
+#endif
 #include "pch.h"
 #include "Psvr2Triggers.h"
 #include "VRRuntime.h"
 #include "XRSession.h"
 #include "XRCapture.h"
+#include "Overlay.h"
 #include "GameInfo.h"
 #include "CameraHook.h"
 #include "ViewMatrixHook.h"
@@ -165,13 +173,14 @@ namespace
     }
 
     void Capture(IDXGISwapChain* sc, ID3D11Device* dev, ID3D11Texture2D* bb)
-    {
+    { DVR_PROFILE("VRRuntime.Capture");
         std::string tag;
         { std::lock_guard lk(g_CapMutex); tag = g_CapTag; }
         ID3D11DeviceContext* ctx = nullptr; dev->GetImmediateContext(&ctx);
         std::wstring dir = GameInfo::GameDir() + L"\\";
         std::wstring wtag(tag.begin(), tag.end());
         bool ok = XRCapture::SaveTextureToPng(dev, ctx, bb, (dir + L"DVR_" + wtag + L"_frame.png").c_str());
+        if (Overlay::Visible()) Overlay::CaptureMenu(dir + L"DVR_" + wtag + L"_menu.png");
         int eyes = 0;
         if (g_Session.IsInitialized())
             for (int i = 0; i < 2; i++)
@@ -235,7 +244,7 @@ void VRRuntime::RequestCapture(const std::string& tag)
 }
 
 void VRRuntime::OnPresent(IDXGISwapChain* sc)
-{
+{ DVR_PROFILE("VRRuntime.VRRuntime::OnPresent");
     {   // which view this Present shows (see PickRenderPose), and the check against the image's own TAA dispatch
         g_DropThis = false;
         const unsigned long long rule = g_LatestAtPresent ? (unsigned long long)((long long)g_LatestAtPresent + g_PhaseOffset) : 0;
@@ -525,6 +534,23 @@ void VRRuntime::OnPresent(IDXGISwapChain* sc)
                         useTans(rp); if (rp.valid && rp.eye >= 0) g_Session.SetSourceWarp(rp.eye, rp.warp);
                     }
                     declareFor(true);
+#ifdef DVR_HAS_PDAFW
+                    bool submittedAfw=false;static unsigned afwMiss=0;
+                    if(AfwLive::Enabled() && !Overlay::Visible()) {
+                        int poseSource=0;auto fresh=PickRenderPose(poseSource);ViewMatrixHook::XrPose held;
+                        Microsoft::WRL::ComPtr<ID3D11Device> afwDevice;Microsoft::WRL::ComPtr<ID3D11DeviceContext> afwContext;bb->GetDevice(&afwDevice);afwDevice->GetImmediateContext(&afwContext);
+                        if(auto* reconstructed=AfwLive::Rebuild(afwContext.Get(),bb,fresh,held)) {
+                            float poses[2][7];ViewMatrixHook::XrPose p[2];p[fresh.eye]=fresh;p[fresh.eye^1]=held;
+                            ID3D11Texture2D* images[2];images[fresh.eye]=bb;images[fresh.eye^1]=reconstructed;
+                            for(int i=0;i<2;++i){memcpy(poses[i],p[i].quat,16);memcpy(poses[i]+4,p[i].pos,12);}
+                            const bool accepted=g_Session.SubmitReconstructedPair(images[0],images[1],poses[0],poses[1],p[0].tan,p[1].tan,p[0].warp,p[1].warp);
+                            AfwLive::Submitted(accepted);submittedAfw=true;afwMiss=0;
+                        } else if(++afwMiss>=12) {
+                            LOGI("AFW returning to native stereo: {} | {}",AfwLive::Status(),DlssLive::Status());AfwLive::Fallback();DlssLive::SetEnabled(false);RenderRes::SetTemporalScale(0);StereoSync::SetActive(true);g_Stereo=false;afwMiss=0;
+                        }
+                    } else afwMiss=0;
+                    if(!submittedAfw)
+#endif
                     g_Session.SubmitFrame(bb, target);
                     g_CurEye.store(eye ^ 1);      // next frame renders from the other eye
                 }
@@ -584,6 +610,8 @@ void VRRuntime::OnPresent(IDXGISwapChain* sc)
         g_Status.running = g_Session.IsSessionRunning();
         g_Status.state = g_Session.SessionState();
         g_Status.framesSubmitted = g_Session.FramesSubmitted();
+        g_Status.framesAccepted = g_Session.FramesAccepted();
+        g_Status.nativePairsAccepted = g_Session.NativePairsAccepted();
         g_Status.eyeW = g_Session.EyeWidth(); g_Status.eyeH = g_Session.EyeHeight();
         g_Status.runtime = g_Session.RuntimeName(); g_Status.system = g_Session.SystemName();
         g_Status.error = g_Session.LastError();
@@ -701,7 +729,11 @@ std::string VRRuntime::SyncStatus()
     std::lock_guard lk(g_StatusMutex);
     return fmt::format("syncstereo staged {} stagefail {} pairs {} unpaired {} (right {}, own eye {} rule {}) mono {} leftalone {} dropped {} submitted {} backdropeyes {} | presented view by frame order, checked by its TAA: agree {} disagree {} no-taa {} | stereo_fps {:.1f}",
                        g_Sync.staged, g_Sync.stageFailed, g_Sync.pairs, g_Sync.unpaired, g_Sync.unpairedRight, g_Sync.ownEye, g_UnpairedOwn.load(), g_Sync.mono, g_Sync.leftAlone, g_Sync.dropped,
-                       g_Session.PairsSubmitted(), g_Session.BackdropEyes() ? 1 : 0, g_TaaAgree, g_TaaDisagree, g_TaaNone, NowS()-g_PairRateLast<.5 ? g_PairFps : 0.);
+                       g_Session.PairsSubmitted(), g_Session.BackdropEyes() ? 1 : 0, g_TaaAgree, g_TaaDisagree, g_TaaNone, NowS()-g_PairRateLast<.5 ? g_PairFps : 0.)
+#ifdef DVR_HAS_PDAFW
+        + " | " + AfwLive::Status()
+#endif
+        ;
 }
 unsigned VRRuntime::RecenterEvents() { return g_Session.RecenterEvents(); }
 unsigned long long VRRuntime::LostFrames(int dev) { return g_Session.LostFrames(dev); }

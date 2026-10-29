@@ -1,7 +1,9 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include <algorithm>
 #include <cmath>
 #include "Overlay.h"
+#include "XRCapture.h"
 #include "MenuHold.h"
 #include "GameInfo.h"
 #include "CVars.h"
@@ -13,6 +15,11 @@
 #include "Commands.h"
 #include "StereoSync.h"
 #include "StereoTaa.h"
+#ifdef DVR_HAS_PDAFW
+#include "AfwLive.h"
+#include "DlssLive.h"
+#include "Settings.h"
+#endif
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
@@ -98,7 +105,7 @@ namespace
         g_Hwnd = sd.OutputWindow;
         ImGui::CreateContext();
         ImGui::GetIO().IniFilename = nullptr;
-        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_NavEnableKeyboard;
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         ImGui_ImplWin32_Init(g_Hwnd);
         ImGui_ImplDX11_Init(g_Device, g_Ctx);
         LiveWheel::Prepare(g_Device);
@@ -120,20 +127,37 @@ namespace
         ImGui::Begin("DishonoredVR", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
         ImGui::SetWindowFontScale(1.5f);
         ImGui::TextUnformatted("Sticks: navigate | A: confirm | B: close | Hold X 3s: open");
-        ImGui::Text("Exe %s (%s)  |  %ux%u  |  %.1f fps", GameInfo::Version().c_str(),
-                    GameInfo::IsSupportedBuild() ? "supported" : "UNSUPPORTED build", g_W, g_H, g_Fps);
-        ImGui::Text("OpenXR probe: %s", XRProbe::Summary().c_str());
-        {
-            auto st = VRRuntime::GetStatus();
-            if (st.initialized)
-                ImGui::Text("XR session: %s / %s  state=%d running=%d  eye=%ux%u  frames=%llu",
-                            st.runtime.c_str(), st.system.c_str(), st.state, (int)st.running, st.eyeW, st.eyeH, st.framesSubmitted);
-            else
-                ImGui::Text("XR session: not running (%s)", st.error.c_str());
-        }
+        auto st = VRRuntime::GetStatus();
+        if (!st.initialized) ImGui::TextWrapped("Headset session: %s", st.error.c_str());
         ImGui::Separator();
         if (ImGui::CollapsingHeader("Rendering", ImGuiTreeNodeFlags_DefaultOpen))
         {
+#ifdef DVR_HAS_PDAFW
+            static std::string saveMessage;
+            const int active = AfwLive::Enabled() ? 1 : StereoSync::Active() ? 0 : VRRuntime::Stereo() ? 3 : 2;
+            static int renderer = active;
+            static int quality = DlssLive::Quality();
+            static bool pending = false;
+            if (!pending) { renderer = active; quality = DlssLive::Quality(); }
+            pending |= ImGui::Combo("Renderer", &renderer, "Native Stereo\0AFW + DLSS (experimental)\0Mono (no depth)\0Alternating eyes (AER)\0");
+            ImGui::SetItemDefaultFocus();
+            if (renderer == 1)
+                pending |= ImGui::Combo("DLSS quality", &quality, "DLAA\0Quality\0Balanced\0Performance\0Ultra Performance\0");
+            const char* names[] = {"Native Stereo", "AFW + DLSS", "Mono", "Alternating eyes (AER)"};
+            ImGui::Text("Active: %s", names[active]);
+            if (ImGui::Button("Apply renderer")) {
+                const int mode = renderer == 1 ? quality + 1 : renderer == 2 ? 6 : renderer == 3 ? 7 : 0;
+                Commands::Queue(fmt::format("vr afw {}", mode <= 5 ? mode : 0));
+                if (mode >= 6) Commands::Queue(mode == 6 ? "vr stereo 0" : "vr stereo 1");
+                saveMessage = Settings::SaveRenderer(mode) ? "Choice queued and saved; active mode is shown above." : "Choice queued for this session; settings could not be saved.";
+                pending = false;
+            }
+            if (pending) ImGui::TextWrapped("Selection not applied. Choose Apply renderer to switch.");
+            if (!saveMessage.empty()) ImGui::TextWrapped("%s", saveMessage.c_str());
+            if (renderer == 1) ImGui::TextWrapped("Close this menu to activate AFW reconstruction.");
+            ImGui::TextWrapped("%s", AfwLive::Message().c_str());
+            ImGui::TextWrapped("Native renders both eyes at the same moment. Mono has no stereo depth. AER updates one eye per game frame; motion can appear doubled. AFW reconstructs the other eye.");
+#else
             int mode = StereoSync::Active() ? 1 : VRRuntime::Stereo() ? 2 : 0;
             if (ImGui::Combo("Stereo mode", &mode, "Mono (no depth)\0Synchronized stereo\0Alternating eyes (AER)\0"))
                 Commands::Queue(fmt::format("vr stereo {}", mode == 1 ? 2 : mode == 2 ? 1 : 0));
@@ -147,6 +171,7 @@ namespace
                 if (ImGui::Button("Retry per-eye AA")) Commands::Queue("vr stereotaa 1");
             }
             ImGui::TextWrapped("Compare the same stationary scene, then move your head. Changes apply this session only; restart restores your configured stereo mode.");
+#endif
         }
         if (ImGui::CollapsingHeader("CVars", ImGuiTreeNodeFlags_DefaultOpen))
         {
@@ -210,7 +235,7 @@ namespace
 }
 
 void Overlay::OnPresent(IDXGISwapChain* sc)
-{
+{ DVR_PROFILE("Overlay.Overlay::OnPresent");
     if (!g_Init) { g_Init = Init(sc); if (!g_Init) return; }
     ApplyWindowSize();
     g_FrameCount++;
@@ -240,10 +265,11 @@ void Overlay::OnPresent(IDXGISwapChain* sc)
     }
     {
         auto& io = ImGui::GetIO();
-        io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+        // OpenXR owns navigation. Keyboard navigation avoids duplicate XInput gamepad events
+        // from the Win32 backend (the game can expose a synthetic controller).
         const unsigned nav = g_Visible ? g_Nav.load() : 0;
-        const ImGuiKey keys[] = {ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadDpadDown,
-            ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadFaceDown};
+        const ImGuiKey keys[] = {ImGuiKey_UpArrow, ImGuiKey_DownArrow,
+            ImGuiKey_LeftArrow, ImGuiKey_RightArrow, ImGuiKey_Space};
         for(unsigned i=0;i<5;++i) io.AddKeyEvent(keys[i], (nav & (1u<<i))!=0);
     }
     const bool menu=g_Visible.load();
@@ -292,6 +318,7 @@ void Overlay::Shutdown()
 }
 
 bool Overlay::Visible() { return g_Visible; }
+bool Overlay::CaptureMenu(const std::wstring& path) { return g_MenuReady && g_Visible && XRCapture::SaveTextureToPng(g_Device,g_Ctx,g_MenuTex,path.c_str()); }
 HWND Overlay::Window() { return g_Hwnd; }
 
 bool Overlay::ControllerInput(const XRInputState& in, double now)

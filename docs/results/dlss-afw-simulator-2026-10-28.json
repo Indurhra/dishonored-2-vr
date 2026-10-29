@@ -1,0 +1,192 @@
+{
+  "date": "2026-10-28",
+  "candidate_sha256": "AE54EFFA0C941EDBA2B0C5EBDB692D4902449F71A989C813FFAE3DFB7F887CF8",
+  "plugin_sha256": "48D5849F64AB1B9AB2717247562AFC203CD92900C901510983C745618CC9E5D5",
+  "runtime": "DishonoredVR Mock Runtime",
+  "scene": "Edge of the World balcony, stationary head and controllers, sword/crossbow visible",
+  "output_per_eye": [
+    3286,
+    3555
+  ],
+  "xr_eye": [
+    3072,
+    3264
+  ],
+  "engine_cap": 300,
+  "mock_pace": 240,
+  "fps_definition": "accepted completed stereo submissions / elapsed wall seconds",
+  "gain_percent_vs_bracketing_native_mean": 59.870661852281074,
+  "final_candidate": {
+    "final_afw_dlaa": {
+      "seconds": 13.163815021514893,
+      "stereo_fps": 92.22250525518953,
+      "ms_per_pair": 10.84334021541589,
+      "deltas": {
+        "presents": 1214,
+        "native_pairs": 0,
+        "afw_fresh": 1214,
+        "afw_rebuilt": 1214,
+        "afw_accepted": 1214,
+        "afw_refused": 0,
+        "held_simulation_ticks": 0,
+        "taa_dispatches": 1214
+      },
+      "private_memory_bytes": 14294071003.428572
+    },
+    "final_native_a": {
+      "seconds": 13.181789875030518,
+      "stereo_fps": 57.50357175969209,
+      "ms_per_pair": 17.39022410953894,
+      "deltas": {
+        "presents": 1515,
+        "native_pairs": 758,
+        "afw_fresh": 0,
+        "afw_rebuilt": 0,
+        "afw_accepted": 0,
+        "afw_refused": 0,
+        "held_simulation_ticks": 758,
+        "taa_dispatches": 1515
+      },
+      "private_memory_bytes": 10870548187.428572
+    },
+    "final_native_b": {
+      "seconds": 13.167939901351929,
+      "stereo_fps": 57.86782182395644,
+      "ms_per_pair": 17.280761025396234,
+      "deltas": {
+        "presents": 1523,
+        "native_pairs": 762,
+        "afw_fresh": 0,
+        "afw_rebuilt": 0,
+        "afw_accepted": 0,
+        "afw_refused": 0,
+        "held_simulation_ticks": 762,
+        "taa_dispatches": 1523
+      },
+      "private_memory_bytes": 10960835730.285715
+    }
+  },
+  "quality_sweep_candidate_sha256": "5D5D466663C7CDB3E76F6FFAFF5159B6DCB024BCA89BF8A70A0C801314A83E69",
+  "quality_sweep": {
+    "converted_mode_0": {
+      "seconds": 16.219249963760376,
+      "stereo_fps": 57.894169095245644,
+      "ms_per_pair": 17.2728966600217,
+      "deltas": {
+        "presents": 1877,
+        "native_pairs": 939,
+        "afw_fresh": 0,
+        "afw_rebuilt": 0,
+        "afw_accepted": 0,
+        "afw_refused": 0,
+        "held_simulation_ticks": 939,
+        "taa_dispatches": 1877
+      },
+      "private_memory_bytes": 9553728692.705883
+    },
+    "converted_mode_1": {
+      "seconds": 16.231345176696777,
+      "stereo_fps": 92.0441271956267,
+      "ms_per_pair": 10.864354201269595,
+      "deltas": {
+        "presents": 1494,
+        "native_pairs": 0,
+        "afw_fresh": 1494,
+        "afw_rebuilt": 1494,
+        "afw_accepted": 1494,
+        "afw_refused": 0,
+        "held_simulation_ticks": 0,
+        "taa_dispatches": 1494
+      },
+      "private_memory_bytes": 14046667474.82353
+    },
+    "converted_mode_2": {
+      "seconds": 16.17802095413208,
+      "stereo_fps": 87.8970304236627,
+      "ms_per_pair": 11.376948631597806,
+      "deltas": {
+        "presents": 1422,
+        "native_pairs": 0,
+        "afw_fresh": 1422,
+        "afw_rebuilt": 1422,
+        "afw_accepted": 1422,
+        "afw_refused": 0,
+        "held_simulation_ticks": 0,
+        "taa_dispatches": 1422
+      },
+      "private_memory_bytes": 13522850514.82353
+    },
+    "converted_mode_3": {
+      "seconds": 16.207422971725464,
+      "stereo_fps": 87.30567484223293,
+      "ms_per_pair": 11.454009167297148,
+      "deltas": {
+        "presents": 1415,
+        "native_pairs": 0,
+        "afw_fresh": 1415,
+        "afw_rebuilt": 1415,
+        "afw_accepted": 1415,
+        "afw_refused": 0,
+        "held_simulation_ticks": 0,
+        "taa_dispatches": 1415
+      },
+      "private_memory_bytes": 13513321773.17647
+    },
+    "converted_mode_4": {
+      "seconds": 16.195226907730103,
+      "stereo_fps": 88.17412736084636,
+      "ms_per_pair": 11.341195313536486,
+      "deltas": {
+        "presents": 1428,
+        "native_pairs": 0,
+        "afw_fresh": 1428,
+        "afw_rebuilt": 1428,
+        "afw_accepted": 1428,
+        "afw_refused": 0,
+        "held_simulation_ticks": 0,
+        "taa_dispatches": 1428
+      },
+      "private_memory_bytes": 14147224756.705883
+    },
+    "converted_mode_5": {
+      "seconds": 16.17496085166931,
+      "stereo_fps": 87.2335959845232,
+      "ms_per_pair": 11.463473317979668,
+      "deltas": {
+        "presents": 1411,
+        "native_pairs": 0,
+        "afw_fresh": 1411,
+        "afw_rebuilt": 1411,
+        "afw_accepted": 1411,
+        "afw_refused": 0,
+        "held_simulation_ticks": 0,
+        "taa_dispatches": 1411
+      },
+      "private_memory_bytes": 13968818176
+    },
+    "converted_native_b": {
+      "seconds": 14.202831983566284,
+      "stereo_fps": 56.96047104803269,
+      "ms_per_pair": 17.55603459031679,
+      "deltas": {
+        "presents": 1618,
+        "native_pairs": 809,
+        "afw_fresh": 0,
+        "afw_rebuilt": 0,
+        "afw_accepted": 0,
+        "afw_refused": 0,
+        "held_simulation_ticks": 809,
+        "taa_dispatches": 1618
+      },
+      "private_memory_bytes": 10901173316.266666
+    }
+  },
+  "limitations": [
+    "Simulator measurements, not headset/compositor measurements",
+    "Wall ms/pair is not separate CPU or GPU render time",
+    "Private memory is not VRAM",
+    "Native TAA execution and late spatial pass still cost work",
+    "Output resizing falls back to native and needs backend restart",
+    "Camera-cut/loading history and headset image quality not accepted"
+  ]
+}

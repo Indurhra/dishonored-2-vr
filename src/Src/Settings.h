@@ -7,6 +7,7 @@
 //! turned into the same `vr ...` commands the test channel uses, so a setting does exactly what its command does.
 namespace Settings
 {
+    bool SaveRenderer(int mode); // 0 native; 1 DLAA through 5 Ultra Performance; 6 mono; 7 AER
     void Load();                                  //!< InitThread, before anything asks for a setting
     std::vector<std::string> StartupCommands();   //!< run at the first Present (input layout, turning)
     std::vector<std::string> PackageCommands();   //!< run when the VR package switches on in a game

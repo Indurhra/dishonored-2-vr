@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "D3D11Hook.h"
 #include "RenderRes.h"
@@ -18,6 +19,7 @@ namespace
     {
         if ((flags & DXGI_PRESENT_TEST) || g_InPresent.exchange(true))
             return g_RealPresent(sc, sync, flags);
+        FrameProfile::Frame();FrameProfile::Poll();DVR_PROFILE("D3D11Hook.HkPresent");
         static double previousReturn=0;
         const double entered=WaitTrace::Now();
         if(previousReturn) WaitTrace::Add(WaitTrace::EngineGap,entered-previousReturn);

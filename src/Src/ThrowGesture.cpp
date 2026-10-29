@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "ThrowGesture.h"
 #include "GameInfo.h"
@@ -286,7 +287,7 @@ void ThrowGesture::Tick(const XRInputState& in, bool triggerHeld)
 }
 
 void ThrowGesture::OnPresent()
-{
+{ DVR_PROFILE("ThrowGesture.ThrowGesture::OnPresent");
     void* ent = g_TrackEnt.load();
     if (!ent) return;
     const double now = QpcSec();

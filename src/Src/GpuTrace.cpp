@@ -1,7 +1,12 @@
+#include "SceneFoveation.h"
+#include "FrameProfile.h"
 #include "pch.h"
 #include "ArmCalibration.h"
 #include "ArmHandback.h"
 #include "GpuTrace.h"
+#include "GpuListTiming.h"
+#include "TemporalBoundary.h"
+#include "DlssLive.h"
 #include "PipeTrace.h"
 #include "PlayerState.h"
 #include "GrabHand.h"
@@ -1914,7 +1919,7 @@ namespace
         return (bd.ByteWidth >= kInstMinBytes && bd.ByteWidth <= kInstMaxBytes) ? bd.ByteWidth : 0;
     }
     void StoreShadow(ID3D11Resource* r, const void* data, UINT bytes)
-    {
+    { DVR_PROFILE_DETAIL("GpuTrace.StoreShadow");
         ShadowEntry& e = t_Shadow[SlotOf(r)];
         e.buf = static_cast<ID3D11Buffer*>(r); e.bytes = bytes;
         memcpy(e.f, data, bytes);
@@ -1937,7 +1942,7 @@ namespace
     }
     bool MapPending() { for (int i = 0; i < kMapSlots; i++) if (t_MapRes[i]) return true; return false; }
     void CaptureMap(ID3D11Resource* r)
-    {
+    { DVR_PROFILE_DETAIL("GpuTrace.CaptureMap");
         for (int i = 0; i < kMapSlots; i++)
             if (t_MapRes[i] == r)
             {   // read before the real Unmap: after it the driver may have taken the memory back
@@ -2009,7 +2014,7 @@ namespace
         return (bd.ByteWidth >= kPalMinBytes && bd.ByteWidth <= kPalMaxBytes) ? bd.ByteWidth : 0;
     }
     void StorePalette(ID3D11Resource* r, const void* data, UINT bytes)
-    {
+    { DVR_PROFILE_DETAIL("GpuTrace.StorePalette");
         std::lock_guard lk(g_PalM);
         int slot = -1, oldest = 0;
         for (int i = 0; i < kPalMax; i++)
@@ -2041,7 +2046,7 @@ namespace
     }
     bool PalMapPending() { for (int i = 0; i < kPalMapSlots; i++) if (t_PalMapRes[i]) return true; return false; }
     void CapturePalMap(ID3D11Resource* r)
-    {
+    { DVR_PROFILE_DETAIL("GpuTrace.CapturePalMap");
         for (int i = 0; i < kPalMapSlots; i++)
             if (t_PalMapRes[i] == r)
             {
@@ -3393,7 +3398,9 @@ namespace
     FinishCL_t g_RealFinishCL = nullptr; ExecCL_t g_RealExecCL = nullptr;
     HRESULT STDMETHODCALLTYPE HkFinishCL(ID3D11DeviceContext* c, BOOL restore, ID3D11CommandList** pp)
     {
-        const HRESULT hr = g_RealFinishCL(c, restore, pp);
+        SceneFoveation::End(c);
+        HRESULT hr = g_RealFinishCL(c, restore, pp);
+        if(SUCCEEDED(hr)&&pp&&*pp){DlssLive::OnFinish(c,*pp);const auto boundary=TemporalBoundary::OnFinish(c,*pp);if(FAILED(boundary)){(*pp)->Release();*pp=nullptr;hr=boundary;}}
         unsigned long long s = 0;
         {
             std::lock_guard lk(g_CtxSerM);
@@ -3405,7 +3412,7 @@ namespace
         return hr;
     }
     void NoteExecuted(ID3D11CommandList* l)
-    {
+    { DVR_PROFILE_DETAIL("GpuTrace.NoteExecuted");
         StereoTaa::OnExecuteList(l);
         unsigned long long s = 0;
         {
@@ -3421,7 +3428,7 @@ namespace
         explicit HookScope(int slot):depth(g_HookDepth[slot]),outer(depth++==0){}
         ~HookScope(){--depth;}
     };
-    void STDMETHODCALLTYPE HkExecCL(ID3D11DeviceContext* c, ID3D11CommandList* l, BOOL restore) { HookScope call(58); if(call.outer) NoteExecuted(l); g_RealExecCL(c, l, restore); }
+    void STDMETHODCALLTYPE HkExecCL(ID3D11DeviceContext* c, ID3D11CommandList* l, BOOL restore) { DVR_PROFILE("GpuTrace.HkExecCL"); HookScope call(58); const int timing=call.outer?GpuListTiming::Begin(c):-1; if(call.outer){TemporalBoundary::ExecutePrefixes(c,l,[](ID3D11DeviceContext* context,ID3D11CommandList* prefix){NoteExecuted(prefix);([&](){DVR_PROFILE("driver.g_RealExecCL");return g_RealExecCL(context,prefix,TRUE);}());DlssLive::AfterExecute(context,prefix);});NoteExecuted(l);} ([&](){DVR_PROFILE("driver.g_RealExecCL");return g_RealExecCL(c, l, restore);}()); if(call.outer)DlssLive::AfterExecute(c,l); GpuListTiming::End(c,timing); }
 
 
     //! Alternating-eye stereo with per-eye TAA: an entity's draw carries the previous MVP the engine cached from the
@@ -3556,7 +3563,7 @@ namespace
     //! kept because it is the scaffolding the swap mechanism was debugged on. Always paired with EndTarget.
     struct TargetSwap { Swap six; bool legacy = false; ID3D11Buffer* legacyPrev = nullptr; };
     void BeginTarget(ID3D11DeviceContext* c, UINT n, TargetSwap& t)
-    {
+    { DVR_PROFILE_DETAIL("GpuTrace.BeginTarget");
         if (Scanning()) ScanDraw(c, n);
         const bool byIndex = IsTarget(n);
         const bool candidate = byIndex || g_Near.load() > 0.f;
@@ -3565,13 +3572,13 @@ namespace
         if (byIndex && g_BindEnabled.load() && ViewOffsetOn()) t.legacy = BindPatchedView(c, &t.legacyPrev);
     }
     void EndTarget(ID3D11DeviceContext* c, TargetSwap& t)
-    {
+    { DVR_PROFILE_DETAIL("GpuTrace.EndTarget");
         EndSixDof(c, t.six);
         RestoreView(c, t.legacy, t.legacyPrev);
     }
 
     void Record(ID3D11DeviceContext* ctx, int kind, Entry e, UINT indexCount)
-    {
+    { DVR_PROFILE_DETAIL("GpuTrace.Record");
         g_Counts[kind][e]++;
         g_Stats.draws++;
         if (g_WantConstants.load() && IsTarget(indexCount)) { CaptureConstants(ctx); g_WantConstants = false; }
@@ -3699,10 +3706,10 @@ namespace
         static inline Copy_t         realCopy = nullptr;
 
         static void STDMETHODCALLTYPE Dispatch(ID3D11DeviceContext* c, UINT x, UINT y, UINT z)
-        {
-            HookScope call(41); if(!call.outer) return realDispatch(c, x, y, z);
+        { DVR_PROFILE_DETAIL("GpuTrace.Dispatch");
+            HookScope call(41); if(!call.outer) return ([&](){DVR_PROFILE_DETAIL("driver.realDispatch");return realDispatch(c, x, y, z);}());
             StereoTaa::Pass p; StereoTaa::OnDispatch(c, KIND, x, y, z, false, p);
-            realDispatch(c, x, y, z);
+            ([&](){DVR_PROFILE_DETAIL("driver.realDispatch");return realDispatch(c, x, y, z);}());
             StereoTaa::AfterPass(c, KIND, p);
         }
         static void STDMETHODCALLTYPE DispatchInd(ID3D11DeviceContext* c, ID3D11Buffer* b, UINT o)
@@ -3730,9 +3737,9 @@ namespace
         //! gated on the feature being on, so the cost is one atomic load per Map when it is off.
         static HRESULT STDMETHODCALLTYPE Map(ID3D11DeviceContext* c, ID3D11Resource* r, UINT sub, D3D11_MAP type,
                                              UINT flags, D3D11_MAPPED_SUBRESOURCE* out)
-        {
-            HookScope call(14); if(!call.outer) return realMap(c, r, sub, type, flags, out);
-            HRESULT hr = realMap(c, r, sub, type, flags, out);
+        { DVR_PROFILE_DETAIL("GpuTrace.Map");
+            HookScope call(14); if(!call.outer) return ([&](){DVR_PROFILE_DETAIL("driver.realMap");return realMap(c, r, sub, type, flags, out);}());
+            HRESULT hr = ([&](){DVR_PROFILE_DETAIL("driver.realMap");return realMap(c, r, sub, type, flags, out);}());
             if (SUCCEEDED(hr) && !sub && out && out->pData)
             {
                 StereoTaa::OnMap(c, r, out->pData);
@@ -3742,8 +3749,8 @@ namespace
             return hr;
         }
         static void STDMETHODCALLTYPE Unmap(ID3D11DeviceContext* c, ID3D11Resource* r, UINT sub)
-        {
-            HookScope call(15); if(!call.outer) return realUnmap(c, r, sub);
+        { DVR_PROFILE_DETAIL("GpuTrace.Unmap");
+            HookScope call(15); if(!call.outer) return ([&](){DVR_PROFILE_DETAIL("driver.realUnmap");return realUnmap(c, r, sub);}());
             if (!sub)
             {   // StereoTaa first: the PerViewCB of the TAA
                 StereoTaa::OnUnmap(c, r);
@@ -3752,12 +3759,12 @@ namespace
                 if (ShadowWanted() || MapPending()) CaptureMap(r);
                 if (g_HandFollow.load() || PalMapPending()) CapturePalMap(r);
             }
-            realUnmap(c, r, sub);
+            ([&](){DVR_PROFILE_DETAIL("driver.realUnmap");return realUnmap(c, r, sub);}());
         }
         static void STDMETHODCALLTYPE UpdateSub(ID3D11DeviceContext* c, ID3D11Resource* r, UINT sub,
                                                 const D3D11_BOX* box, const void* data, UINT rp, UINT dp)
-        {
-            HookScope call(48); if(!call.outer) return realUpdateSub(c, r, sub, box, data, rp, dp);
+        { DVR_PROFILE_DETAIL("GpuTrace.UpdateSub");
+            HookScope call(48); if(!call.outer) return ([&](){DVR_PROFILE_DETAIL("driver.realUpdateSub");return realUpdateSub(c, r, sub, box, data, rp, dp);}());
             // t_InSwap: our own rewrite goes through this very hook and would cache OUR buffer, evicting the game's
             // entry from the same slot and starving the next draw.
             if (!sub && !box && data && !t_InSwap)
@@ -3766,72 +3773,72 @@ namespace
                 if (ShadowWanted()) { if (UINT bytes = InstanceBufferBytes(r)) StoreShadow(r, data, bytes); }
                 if (g_HandFollow.load()) { if (UINT pb = PaletteBytes(r)) StorePalette(r, data, pb); }
             }
-            realUpdateSub(c, r, sub, box, data, rp, dp);
+            ([&](){DVR_PROFILE_DETAIL("driver.realUpdateSub");return realUpdateSub(c, r, sub, box, data, rp, dp);}());
         }
 
         static void STDMETHODCALLTYPE DrawIndexed(ID3D11DeviceContext* c, UINT n, UINT s, INT b)
-        {
-            HookScope call(12); if(!call.outer) return realDrawIndexed(c, n, s, b);
+        { DVR_PROFILE_DETAIL("GpuTrace.DrawIndexed");
+            HookScope call(12); if(!call.outer) return ([&](){DVR_PROFILE_DETAIL("driver.realDrawIndexed");return realDrawIndexed(c, n, s, b);}());
             Record(c, KIND, eDrawIndexed, n);
             WristHud::OnDraw(c, KIND, eDrawIndexed, n);
             if (Skipped(n) || SkippedVs(c)) return;
             if (WristHud::DropDraw(c, KIND)) return;      // a cutscene's letterbox bar
-            { WristHud::Mirror wm; if (WristHud::MirrorBegin(c, KIND, wm)) { realDrawIndexed(c, n, s, b); WristHud::MirrorEnd(c, wm); if (wm.lift) return; } }
+            { WristHud::Mirror wm; if (WristHud::MirrorBegin(c, KIND, wm)) { SceneFoveation::End(c); ([&](){DVR_PROFILE_DETAIL("driver.realDrawIndexed");return realDrawIndexed(c, n, s, b);}()); WristHud::MirrorEnd(c, wm); if (wm.lift) return; } }
             TargetSwap t; BeginTarget(c, n, t);
             StereoTaa::Pass sp; StereoTaa::OnDraw(c, KIND, eDrawIndexed, n, sp);
-            realDrawIndexed(c, n, s, b);
+            ([&](){DVR_PROFILE_DETAIL("driver.realDrawIndexed");return realDrawIndexed(c, n, s, b);}());
             StereoTaa::AfterPass(c, KIND, sp);
             EndTarget(c, t);
         }
         static void STDMETHODCALLTYPE Draw(ID3D11DeviceContext* c, UINT n, UINT s)
-        {
-            HookScope call(13); if(!call.outer) return realDraw(c, n, s);   // proximity targeting works off the constants, not the count, so the non-indexed paths qualify too --
+        { DVR_PROFILE_DETAIL("GpuTrace.Draw");
+            HookScope call(13); if(!call.outer) return ([&](){DVR_PROFILE_DETAIL("driver.realDraw");return realDraw(c, n, s);}());   // proximity targeting works off the constants, not the count, so the non-indexed paths qualify too --
             // and a weapon pass left out here would stay behind and clip the moved geometry against its own depth
             Record(c, KIND, eDraw, n);
             WristHud::OnDraw(c, KIND, eDraw, n);
             if (SkippedVs(c)) return;
             if (WristHud::DropDraw(c, KIND)) return;      // a cutscene's letterbox bar
-            { WristHud::Mirror wm; if (WristHud::MirrorBegin(c, KIND, wm)) { realDraw(c, n, s); WristHud::MirrorEnd(c, wm); if (wm.lift) return; } }
+            { WristHud::Mirror wm; if (WristHud::MirrorBegin(c, KIND, wm)) { SceneFoveation::End(c); ([&](){DVR_PROFILE_DETAIL("driver.realDraw");return realDraw(c, n, s);}()); WristHud::MirrorEnd(c, wm); if (wm.lift) return; } }
             TargetSwap t; BeginTarget(c, n, t);
             StereoTaa::Pass sp; StereoTaa::OnDraw(c, KIND, eDraw, n, sp);
-            realDraw(c, n, s);
+            ([&](){DVR_PROFILE_DETAIL("driver.realDraw");return realDraw(c, n, s);}());
             StereoTaa::AfterPass(c, KIND, sp);
             EndTarget(c, t);
         }
         static void STDMETHODCALLTYPE DrawIdxInst(ID3D11DeviceContext* c, UINT n, UINT i, UINT s, INT b, UINT si)
-        {
-            HookScope call(20); if(!call.outer) return realDrawIdxInst(c, n, i, s, b, si);
+        { DVR_PROFILE_DETAIL("GpuTrace.DrawIdxInst");
+            HookScope call(20); if(!call.outer) return ([&](){DVR_PROFILE_DETAIL("driver.realDrawIdxInst");return realDrawIdxInst(c, n, i, s, b, si);}());
             Record(c, KIND, eDrawIndexedInstanced, n);
             WristHud::OnDraw(c, KIND, eDrawIndexedInstanced, n);
             if (Skipped(n) || SkippedVs(c)) return;
             if (WristHud::DropDraw(c, KIND)) return;      // a cutscene's letterbox bar
-            { WristHud::Mirror wm; if (WristHud::MirrorBegin(c, KIND, wm)) { realDrawIdxInst(c, n, i, s, b, si); WristHud::MirrorEnd(c, wm); if (wm.lift) return; } }
+            { WristHud::Mirror wm; if (WristHud::MirrorBegin(c, KIND, wm)) { SceneFoveation::End(c); ([&](){DVR_PROFILE_DETAIL("driver.realDrawIdxInst");return realDrawIdxInst(c, n, i, s, b, si);}()); WristHud::MirrorEnd(c, wm); if (wm.lift) return; } }
             TargetSwap t; BeginTarget(c, n, t);
             StereoTaa::Pass sp; StereoTaa::OnDraw(c, KIND, eDrawIndexedInstanced, n, sp);
-            realDrawIdxInst(c, n, i, s, b, si);
+            ([&](){DVR_PROFILE_DETAIL("driver.realDrawIdxInst");return realDrawIdxInst(c, n, i, s, b, si);}());
             StereoTaa::AfterPass(c, KIND, sp);
             EndTarget(c, t);
         }
         static void STDMETHODCALLTYPE DrawInst(ID3D11DeviceContext* c, UINT n, UINT i, UINT s, UINT si)
-        {
-            HookScope call(21); if(!call.outer) return realDrawInst(c, n, i, s, si);
+        { DVR_PROFILE_DETAIL("GpuTrace.DrawInst");
+            HookScope call(21); if(!call.outer) return ([&](){DVR_PROFILE_DETAIL("driver.realDrawInst");return realDrawInst(c, n, i, s, si);}());
             Record(c, KIND, eDrawInstanced, n);
             WristHud::OnDraw(c, KIND, eDrawInstanced, n);
             if (SkippedVs(c)) return;
             if (WristHud::DropDraw(c, KIND)) return;      // a cutscene's letterbox bar
-            { WristHud::Mirror wm; if (WristHud::MirrorBegin(c, KIND, wm)) { realDrawInst(c, n, i, s, si); WristHud::MirrorEnd(c, wm); if (wm.lift) return; } }
+            { WristHud::Mirror wm; if (WristHud::MirrorBegin(c, KIND, wm)) { SceneFoveation::End(c); ([&](){DVR_PROFILE_DETAIL("driver.realDrawInst");return realDrawInst(c, n, i, s, si);}()); WristHud::MirrorEnd(c, wm); if (wm.lift) return; } }
             TargetSwap t; BeginTarget(c, n, t);
             StereoTaa::Pass sp; StereoTaa::OnDraw(c, KIND, eDrawInstanced, n, sp);
-            realDrawInst(c, n, i, s, si);
+            ([&](){DVR_PROFILE_DETAIL("driver.realDrawInst");return realDrawInst(c, n, i, s, si);}());
             StereoTaa::AfterPass(c, KIND, sp);
             EndTarget(c, t);
         }
         static void STDMETHODCALLTYPE DrawIdxInstIndirect(ID3D11DeviceContext* c, ID3D11Buffer* b, UINT o)
         {
-            HookScope call(39); if(!call.outer) return realDrawIdxInstIndirect(c, b, o); Record(c, KIND, eDrawIndexedInstancedIndirect, 0); if (SkippedVs(c)) return; realDrawIdxInstIndirect(c, b, o); }
+            HookScope call(39); if(!call.outer) return realDrawIdxInstIndirect(c, b, o); SceneFoveation::End(c); Record(c, KIND, eDrawIndexedInstancedIndirect, 0); if (SkippedVs(c)) return; realDrawIdxInstIndirect(c, b, o); }
         static void STDMETHODCALLTYPE DrawInstIndirect(ID3D11DeviceContext* c, ID3D11Buffer* b, UINT o)
         {
-            HookScope call(40); if(!call.outer) return realDrawInstIndirect(c, b, o); Record(c, KIND, eDrawInstancedIndirect, 0); if (SkippedVs(c)) return; realDrawInstIndirect(c, b, o); }
+            HookScope call(40); if(!call.outer) return realDrawInstIndirect(c, b, o); SceneFoveation::End(c); Record(c, KIND, eDrawInstancedIndirect, 0); if (SkippedVs(c)) return; realDrawInstIndirect(c, b, o); }
 
         //! Attach to one vtable. Entries already detoured for the other kind (shared implementation) are skipped.
         static int Attach(void** vt, void** taken, int nTaken)
@@ -3904,8 +3911,8 @@ namespace
         using H=Hooks<0,V>;
         static inline ExecCL_t exec=nullptr;
         static inline bool attached=false;
-        static void STDMETHODCALLTYPE Execute(ID3D11DeviceContext* c,ID3D11CommandList* l,BOOL restore) {
-            HookScope call(58);if(call.outer) NoteExecuted(l);exec(c,l,restore);
+        static void STDMETHODCALLTYPE Execute(ID3D11DeviceContext* c,ID3D11CommandList* l,BOOL restore) { DVR_PROFILE("GpuTrace.Execute");
+            HookScope call(58);const int timing=call.outer?GpuListTiming::Begin(c):-1;if(call.outer){TemporalBoundary::ExecutePrefixes(c,l,[](ID3D11DeviceContext* context,ID3D11CommandList* prefix){NoteExecuted(prefix);exec(context,prefix,TRUE);DlssLive::AfterExecute(context,prefix);});NoteExecuted(l);}exec(c,l,restore);if(call.outer)DlssLive::AfterExecute(c,l);GpuListTiming::End(c,timing);
         }
         static void Attach(void** vt) {
             void* snapshot[115]{};std::copy(vt,vt+115,snapshot);
@@ -4757,7 +4764,7 @@ namespace
 }
 
 void GpuTrace::OnPresent()
-{
+{ DVR_PROFILE("GpuTrace.GpuTrace::OnPresent");
     // Advance after the right view, so the next left/right pair shares one weight.
     // Outside paired play (menus, fallback mono) every Present may advance it.
     if (!g_AnimSuspend.load() && (!StereoSync::Active() || !StereoSync::PairWanted() || StereoSync::LastFrameHeld()))

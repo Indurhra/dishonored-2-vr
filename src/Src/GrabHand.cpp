@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "GrabHand.h"
 #include "GameInfo.h"
@@ -743,7 +744,7 @@ bool GrabHand::Install()
 }
 
 void GrabHand::OnPresent()
-{
+{ DVR_PROFILE("GrabHand.GrabHand::OnPresent");
     FlightLog();
     LearnFist();
     CarryArms();

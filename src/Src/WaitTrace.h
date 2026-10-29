@@ -1,4 +1,5 @@
 #pragma once
+#include "FrameProfile.h"
 #include <array>
 #include <chrono>
 #include <mutex>
@@ -18,8 +19,9 @@ namespace WaitTrace {
         const double ms=seconds*1000.; s.sum+=ms; if(ms>s.peak)s.peak=ms;
     }
     struct Scope {
+        FrameProfile::Scope cpu;
         Kind kind; double start=Now();
-        explicit Scope(Kind k):kind(k){}
+        explicit Scope(Kind k):cpu(k==WaitFrame?"wait.xrWaitFrame":k==BeginFrame?"wait.xrBeginFrame":k==EndFrame?"wait.xrEndFrame":k==AcquireImage?"wait.acquireImage":k==WaitImage?"wait.imageWait":k==DesktopPresent?"wait.desktopPresent":"wait.engineGap"),kind(k){}
         ~Scope(){Add(kind,Now()-start);}
     };
     inline std::string Snapshot() {

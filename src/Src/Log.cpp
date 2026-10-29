@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include <deque>
 
@@ -36,7 +37,7 @@ void Log::Init(const std::wstring& dir)
 }
 
 void Log::Write(const std::string& line)
-{
+{ DVR_PROFILE("Log.Log::Write");
     SYSTEMTIME t; GetLocalTime(&t);
     std::string s = fmt::format("[{:02}:{:02}:{:02}.{:03}] {}\n", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, line);
     OutputDebugStringA(s.c_str());

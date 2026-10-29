@@ -23,6 +23,8 @@ namespace StereoTaa
     //! What the hook before a pass decided, handed to the hook after it.
     struct Pass
     {
+        bool sceneVrs = false;
+        IUnknown* dlssBatch = nullptr;
         int what = 0;                                  // 0 nothing, 1 = TAA dispatch with the history swapped
         int eye = -1, srvSlot = -1;
         ID3D11ShaderResourceView* savedSrv = nullptr;  // the engine's history view, restored after the dispatch

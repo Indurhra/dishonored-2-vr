@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "StereoSync.h"
 #include "GameInfo.h"
@@ -44,10 +45,11 @@ namespace
     void UpdateFrameLimit()
     {
         if (!CVars::Available()) return;
-        const int requested = g_SyncOn.load() && VRRuntime::GetStatus().running ? g_LimitRequested.load() : 0;
+        const int requested = VRRuntime::Stereo() && VRRuntime::GetStatus().running ? g_LimitRequested.load() : 0;
         if (requested == g_LastLimitRequest) {
             // Loading and the visual-settings UI can replace the numeric value.
-            // The explicit VR cap owns it while synchronised stereo is active.
+            // The explicit VR cap owns it in either stereo mode. Otherwise switching to
+            // alternating eyes silently reinstates the flat-game cap (90 FPS in testing).
             // Remember the replacement so leaving stereo restores the user's choice.
             if (requested && g_LimitOwned) {
                 const float current = CVars::GetFloat("com_timeScaler", -1.f);
@@ -296,7 +298,7 @@ void StereoSync::Install()
 }
 
 void StereoSync::OnPresent()
-{
+{ DVR_PROFILE("StereoSync.StereoSync::OnPresent");
     UpdateFrameLimit();
     UiStackTick();
     {   // the gate for the next frames (see PairHold)

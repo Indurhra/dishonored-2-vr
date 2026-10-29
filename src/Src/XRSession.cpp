@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include <vector>
 #include <algorithm>
 #include <d3d11.h>
@@ -1132,7 +1133,7 @@ bool XRSession::InitInput()
 }
 
 void XRSession::SyncInput()
-{
+{ DVR_PROFILE("XRSession.XRSession::SyncInput");
     if (!m_InputReady || !m_SessionRunning)
         return;
 
@@ -1257,7 +1258,7 @@ void XRSession::SyncInput()
 }
 
 void XRSession::LocateHead(long long time, const XREyePose eyes[2], XREyePose& head)
-{
+{ DVR_PROFILE("XRSession.XRSession::LocateHead");
     const XREyePose& a = eyes[0]; const XREyePose& b = eyes[m_ViewCount > 1 ? 1 : 0];
     head = a; head.fovLeft = head.fovRight = head.fovUp = head.fovDown = 0.f;
     head.posX = (a.posX + b.posX) * 0.5f; head.posY = (a.posY + b.posY) * 0.5f; head.posZ = (a.posZ + b.posZ) * 0.5f;
@@ -1294,7 +1295,7 @@ float XRSession::EyeCant(int i) const
 }
 
 bool XRSession::LocateAt(long long time, XREyePose eyes[2], XRHandPose hands[2], XREyePose* head, XRHandPose* grips)
-{
+{ DVR_PROFILE("XRSession.XRSession::LocateAt");
     if (!m_Initialized || !m_SessionRunning || !g.session || !g.space || m_ViewCount != 2 || time <= 0) return false;
     {   // a recenter that takes effect by then: the poses would be in the new space with the old generation
         std::lock_guard<std::mutex> lk(pump.m);
@@ -1470,7 +1471,7 @@ void XRSession::PollEventsNow()
 //! with a bound -- when the runtime does not release one in time the game goes on, this Present is not sent, and the
 //! next one asks again (with a short bound, so the game runs at its own pace until the runtime is back).
 bool XRSession::BeginFrame()
-{
+{ DVR_PROFILE("XRSession.XRSession::BeginFrame");
     if (!m_SessionRunning)
         return false;
 
@@ -1874,7 +1875,7 @@ void XRSession::SubmitFrame(ID3D11Texture2D* source, int onlyEye)
 }
 
 bool XRSession::StagePairLeft(ID3D11Texture2D* source, const float quat[4], const float pos[3], unsigned long long pair, const float* tan, const float* warp)
-{
+{ DVR_PROFILE("XRSession.XRSession::StagePairLeft");
     m_PairStaged = false;
     memcpy(m_PairTan, tan ? tan : m_SrcTan, 16);
     if (warp) memcpy(m_PairWarp, warp, 16); else { m_PairWarp[0] = m_PairWarp[1] = m_PairWarp[2] = 0.f; m_PairWarp[3] = 1.f; }
@@ -1950,7 +1951,7 @@ void XRSession::FillEyeView(int i, XrCompositionLayerProjectionView& pv) const
 
 bool XRSession::DrawInto(int i, ID3D11Texture2D* source, ID3D11ShaderResourceView* srv, ID3D11Texture2D* dst, const float tan[4], const float* warp,
                          bool declare, float fade, const float pose[7])
-{
+{ DVR_PROFILE("XRSession.XRSession::DrawInto");
     float x0 = 0, y0 = 0, rw = 0, rh = 0;
     if (!dst || !EyeRect(i, tan, declare, x0, y0, rw, rh)) return false;
     const bool turned = !declare && warp && fabsf(warp[3]) < 0.9999999f;
@@ -1991,7 +1992,7 @@ bool XRSession::DrawInto(int i, ID3D11Texture2D* source, ID3D11ShaderResourceVie
 
 bool XRSession::DrawEye(int i, ID3D11Texture2D* source, ID3D11ShaderResourceView* srv, const float pose[7], const float tan[4], const float* warp,
                         float fade, XrCompositionLayerProjectionView& pv)
-{
+{ DVR_PROFILE("XRSession.XRSession::DrawEye");
     const bool declare = m_Declare;
     { float x0, y0, rw, rh; EyeRect(i, tan, declare, x0, y0, rw, rh); }   // (the swapchain grown BEFORE an image is acquired)
     uint32_t imgIndex = 0;
@@ -2032,7 +2033,7 @@ bool XRSession::ResubmitLast()
 }
 
 bool XRSession::SubmitPair(ID3D11Texture2D* right, const float quat[4], const float pos[3], unsigned long long pair, const float* tan, const float* warp)
-{
+{ DVR_PROFILE("XRSession.XRSession::SubmitPair");
     float tanR[4]; memcpy(tanR, tan ? tan : m_SrcTan, 16);
     if (!m_FrameStarted || m_ViewCount != 2 || !OrthoReady() || m_MatchedFov) return false;
     if (!m_PairStaged || m_PairId != pair || !m_PairSrv) return false;
@@ -2051,7 +2052,9 @@ bool XRSession::SubmitPair(ID3D11Texture2D* right, const float quat[4], const fl
     layer.viewCount = m_ViewCount;
     layer.views = projViews;
     m_PairsSubmitted++;
+    const auto acceptedBefore=m_FramesAccepted;
     EndFrameWithLayers(layer);
+    if(m_FramesAccepted>acceptedBefore){++m_NativePairsAccepted;FrameProfile::CompleteStereo(false);}
     return true;
 }
 
@@ -2059,7 +2062,7 @@ bool XRSession::SubmitPair(ID3D11Texture2D* right, const float quat[4], const fl
 //! compositor samples it every display frame — always crisp, always fused,
 //! unlike UI baked into the projection. Then ends the frame.
 void XRSession::EndFrameWithLayers(XrCompositionLayerProjection& layer)
-{
+{ DVR_PROFILE("XRSession.XRSession::EndFrameWithLayers");
     XrCompositionLayerQuad quad = { XR_TYPE_COMPOSITION_LAYER_QUAD };
     bool haveQuad = false;
     if (m_QuadSource && g.viewSpace)
@@ -2181,6 +2184,7 @@ void XRSession::EndFrameWithLayers(XrCompositionLayerProjection& layer)
 
     m_FrameStarted = false;
     m_FramesSubmitted++;
+    if(XR_SUCCEEDED(er))++m_FramesAccepted;
     FrameEnded(XR_SUCCEEDED(er));
 }
 
@@ -2288,7 +2292,7 @@ bool XRSession::AppendPanelLayer(int slot, XrCompositionLayerQuad& quad)
 //! Every ~0.2 s of play, the picture just drawn (still in the blitter's copy) goes into the ring at half size, with
 //! the pose it was claimed at and its tangent extents. Not while one is frozen in the ring.
 void XRSession::OfferSnapshot(ID3D11Texture2D* source, const float quat[4], ID3D11ShaderResourceView* left, const float leftQuat[4], const float leftTan[4])
-{
+{ DVR_PROFILE("XRSession.XRSession::OfferSnapshot");
     const long long now = Qpc();
     if (QpcSec(now - m_LastSnapQpc) < 0.2 || !g_Blit.ready || !g_Blit.srv || !g.device || !g.context) return;
     D3D11_TEXTURE2D_DESC sd = {}; source->GetDesc(&sd);
@@ -2406,6 +2410,18 @@ void XRSession::SubmitScreen(const XRBackdrop& b)
     layer.viewCount = m_ViewCount;
     layer.views = projViews;
     EndFrameWithLayers(layer);
+}
+
+bool XRSession::SubmitReconstructedPair(ID3D11Texture2D* eye0, ID3D11Texture2D* eye1,
+    const float pose0[7],const float pose1[7],const float tan0[4],const float tan1[4],const float warp0[4],const float warp1[4])
+{ DVR_PROFILE("XRSession.XRSession::SubmitReconstructedPair");
+    if(!m_FrameStarted || m_ViewCount!=2 || !eye0 || !eye1 || !OrthoReady())return false;
+    XrCompositionLayerProjectionView views[2]{};
+    const bool left=DrawEye(0,eye0,nullptr,pose0,tan0,warp0,1.f,views[0]);
+    const bool right=DrawEye(1,eye1,nullptr,pose1,tan1,warp1,1.f,views[1]);
+    if(!left||!right){EndFrameNoRender();return false;}
+    XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};layer.space=g.space;layer.viewCount=2;layer.views=views;
+    const auto before=m_FramesAccepted;EndFrameWithLayers(layer);if(m_FramesAccepted>before)FrameProfile::CompleteStereo(true);return m_FramesAccepted>before;
 }
 
 void XRSession::SubmitFrameStereo(ID3D11Texture2D* eye0, ID3D11Texture2D* eye1)
@@ -2547,7 +2563,7 @@ void XRSession::SaveLayers(const void* layersIn, unsigned count)
 //! pump.kaOpen set. The device's lock (ID3D11Multithread) is held around the frame calls: a runtime may use the game's
 //! immediate context in them (SteamVR does), and the render thread may be using it at that moment.
 void XRSession::KeepAliveFrame(const void* fsIn)
-{
+{ DVR_PROFILE("XRSession.XRSession::KeepAliveFrame");
     const XrFrameState& fs = *(const XrFrameState*)fsIn;
     XrCompositionLayerProjection proj; XrCompositionLayerProjectionView views[kMaxEyes];
     XrCompositionLayerQuad quads[5]; int nQuads = 0; bool have = false;

@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "MeleeAim.h"
 #include "GameInfo.h"
@@ -617,7 +618,7 @@ void MeleeAim::SetOrigin(int m) { g_Origin = m ? 1 : 0; }
 int MeleeAim::Origin() { return g_Origin; }
 
 void MeleeAim::OnPresent()
-{
+{ DVR_PROFILE("MeleeAim.MeleeAim::OnPresent");
     const bool slash = !strcmp(PlayerState::AnimName(), "Slash");
     static uint64_t gestStart = 0;
     if (slash && !g_InSlash) { g_SlashStart = g_AxisRedirects.load(); gestStart = g_GestRedirects.load(); g_Logged = false; }

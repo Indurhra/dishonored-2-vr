@@ -100,3 +100,16 @@ DLL 018FC6DD55828008D6DAB5C4213091B4FB99D81DF842D7B34656C8FF700592A8
 Bridge 3137D4B0ABA539EED031ECCA3054341678BC61E9FFE9323FF5796719F861D6CA
 Backup: local/heavy-triggers-backup-20261026-213033. Game left closed for user test.
 No CPU power, cooling, rendering settings, INI, or Toolkit installation changes.
+
+## Pistol break calibration candidate (2026-10-28)
+User requested pistol strength 5 and crossbow strength 4. Pistol weapon mode now
+uses start 5, end 7, strength 5; crossbow retains start 2/end 3 with strength 4.
+Pistol resistance is moved later toward the existing 0.80 firing threshold.
+Motor zones are not verified OpenXR percentages: firing immediately after the
+physical break remains a headset calibration target, not a confirmed result.
+Existing 0.80 fire / 0.70 release logic and power vibration are unchanged.
+Built the production helper in local/trigger-calibration/build and installed only
+that helper; the installed DLSS/game DLL remains unchanged. All eight host tests
+passed, including trigger policy and fake-Toolkit bridge lifecycle checks.
+Installed helper SHA256: 8E95831F48ED7F3119CA8C0C01D0A014181DD1D4FDCF2092FC5F75C9AB5FBBF3
+Previous helper backup: local\trigger-calibration\backup-20261028-215507

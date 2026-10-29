@@ -1,0 +1,1459 @@
+{
+  "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+  "conditions": "MockXR, fixed scene, 3072x3264 output/eye, game allocation 3286x3555; accepted stereo counters; no physical headset acceptance",
+  "benchmarks": {
+    "early_ab_both_a": {
+      "quality_flags": [],
+      "seconds": 21.123817920684814,
+      "stereo_fps": 92.02881824200922,
+      "ms_per_pair": 10.866161481833752,
+      "delta": {
+        "presents": 1944,
+        "native": 0,
+        "fresh": 1944,
+        "rebuilt": 1944,
+        "accepted": 1944,
+        "refused": 0,
+        "taa": 1944,
+        "held": 0
+      },
+      "private_bytes_mean": 12832117666.90909,
+      "movement": 0
+    },
+    "early_ab_both_b": {
+      "quality_flags": [],
+      "seconds": 21.09308385848999,
+      "stereo_fps": 93.82222216897176,
+      "ms_per_pair": 10.658455714244562,
+      "delta": {
+        "presents": 1979,
+        "native": 0,
+        "fresh": 1979,
+        "rebuilt": 1979,
+        "accepted": 1979,
+        "refused": 0,
+        "taa": 1979,
+        "held": 0
+      },
+      "private_bytes_mean": 12886872994.90909,
+      "movement": 0
+    },
+    "early_ab_crop": {
+      "quality_flags": [],
+      "seconds": 21.111205101013184,
+      "stereo_fps": 88.53118479296579,
+      "ms_per_pair": 11.295454842703682,
+      "delta": {
+        "presents": 1869,
+        "native": 0,
+        "fresh": 1869,
+        "rebuilt": 1869,
+        "accepted": 1869,
+        "refused": 0,
+        "taa": 1869,
+        "held": 0
+      },
+      "private_bytes_mean": 12625150696.727272,
+      "movement": 0
+    },
+    "early_ab_legacy_a": {
+      "quality_flags": [],
+      "seconds": 22.1576189994812,
+      "stereo_fps": 88.09610816242052,
+      "ms_per_pair": 11.3512392415375,
+      "delta": {
+        "presents": 1952,
+        "native": 0,
+        "fresh": 1952,
+        "rebuilt": 1952,
+        "accepted": 1952,
+        "refused": 0,
+        "taa": 1952,
+        "held": 0
+      },
+      "private_bytes_mean": 13493561789.217392,
+      "movement": 0
+    },
+    "early_ab_legacy_b": {
+      "quality_flags": [],
+      "seconds": 21.10478401184082,
+      "stereo_fps": 88.60550285427409,
+      "ms_per_pair": 11.28598075499509,
+      "delta": {
+        "presents": 1870,
+        "native": 0,
+        "fresh": 1870,
+        "rebuilt": 1870,
+        "accepted": 1870,
+        "refused": 0,
+        "taa": 1870,
+        "held": 0
+      },
+      "private_bytes_mean": 13532997818.181818,
+      "movement": 0
+    },
+    "early_ab_scan": {
+      "quality_flags": [],
+      "seconds": 22.107352018356323,
+      "stereo_fps": 92.14129301006402,
+      "ms_per_pair": 10.85289740714596,
+      "delta": {
+        "presents": 2037,
+        "native": 0,
+        "fresh": 2037,
+        "rebuilt": 2037,
+        "accepted": 2037,
+        "refused": 0,
+        "taa": 2037,
+        "held": 0
+      },
+      "private_bytes_mean": 13710253901.913044,
+      "movement": 0
+    },
+    "early_after_1": {
+      "quality_flags": [],
+      "seconds": 22.100478172302246,
+      "stereo_fps": 92.62243034023732,
+      "ms_per_pair": 10.79652084626392,
+      "delta": {
+        "presents": 2047,
+        "native": 0,
+        "fresh": 2047,
+        "rebuilt": 2047,
+        "accepted": 2047,
+        "refused": 0,
+        "taa": 2047,
+        "held": 0
+      },
+      "private_bytes_mean": 14083129157.818182,
+      "movement": 0
+    },
+    "early_after_2": {
+      "quality_flags": [],
+      "seconds": 21.08694887161255,
+      "stereo_fps": 93.99178667655363,
+      "ms_per_pair": 10.639227483154666,
+      "delta": {
+        "presents": 1982,
+        "native": 0,
+        "fresh": 1982,
+        "rebuilt": 1982,
+        "accepted": 1982,
+        "refused": 0,
+        "taa": 1982,
+        "held": 0
+      },
+      "private_bytes_mean": 12897926795.636364,
+      "movement": 0
+    },
+    "early_after_3": {
+      "quality_flags": [],
+      "seconds": 21.10494112968445,
+      "stereo_fps": 93.81689282303172,
+      "ms_per_pair": 10.659061176608308,
+      "delta": {
+        "presents": 1980,
+        "native": 0,
+        "fresh": 1980,
+        "rebuilt": 1980,
+        "accepted": 1980,
+        "refused": 0,
+        "taa": 1980,
+        "held": 0
+      },
+      "private_bytes_mean": 12537997870.545454,
+      "movement": 0
+    },
+    "early_after_4": {
+      "quality_flags": [],
+      "seconds": 21.09832501411438,
+      "stereo_fps": 93.32494397933372,
+      "ms_per_pair": 10.715248864456262,
+      "delta": {
+        "presents": 1969,
+        "native": 0,
+        "fresh": 1969,
+        "rebuilt": 1969,
+        "accepted": 1969,
+        "refused": 0,
+        "taa": 1969,
+        "held": 0
+      },
+      "private_bytes_mean": 12839855383.272728,
+      "movement": 0
+    },
+    "early_after_5": {
+      "quality_flags": [],
+      "seconds": 21.093873023986816,
+      "stereo_fps": 93.43945503790057,
+      "ms_per_pair": 10.702117211561044,
+      "delta": {
+        "presents": 1971,
+        "native": 0,
+        "fresh": 1971,
+        "rebuilt": 1971,
+        "accepted": 1971,
+        "refused": 0,
+        "taa": 1971,
+        "held": 0
+      },
+      "private_bytes_mean": 12459888640,
+      "movement": 0
+    },
+    "early_after_native": {
+      "quality_flags": [],
+      "seconds": 21.08917498588562,
+      "stereo_fps": 58.08667246679196,
+      "ms_per_pair": 17.215653049702546,
+      "delta": {
+        "presents": 2450,
+        "native": 1225,
+        "fresh": 0,
+        "rebuilt": 0,
+        "accepted": 0,
+        "refused": 0,
+        "taa": 2450,
+        "held": 1225
+      },
+      "private_bytes_mean": 10732805399.272728,
+      "movement": 0
+    },
+    "early_after_native_b": {
+      "quality_flags": [],
+      "seconds": 21.082222938537598,
+      "stereo_fps": 57.29946047538547,
+      "ms_per_pair": 17.45217130673642,
+      "delta": {
+        "presents": 2415,
+        "native": 1208,
+        "fresh": 0,
+        "rebuilt": 0,
+        "accepted": 0,
+        "refused": 0,
+        "taa": 2415,
+        "held": 1208
+      },
+      "private_bytes_mean": 10772851060.363636,
+      "movement": 0
+    },
+    "early_before_1": {
+      "quality_flags": [],
+      "seconds": 21.15585684776306,
+      "stereo_fps": 86.97355126008779,
+      "ms_per_pair": 11.497748286827752,
+      "delta": {
+        "presents": 1840,
+        "native": 0,
+        "fresh": 1840,
+        "rebuilt": 1840,
+        "accepted": 1840,
+        "refused": 0,
+        "taa": 1840,
+        "held": 0
+      },
+      "private_bytes_mean": 14195525259.636364,
+      "movement": 0
+    },
+    "early_before_2": {
+      "quality_flags": [],
+      "seconds": 21.104818105697632,
+      "stereo_fps": 83.86710518590804,
+      "ms_per_pair": 11.923626048416741,
+      "delta": {
+        "presents": 1770,
+        "native": 0,
+        "fresh": 1770,
+        "rebuilt": 1770,
+        "accepted": 1770,
+        "refused": 0,
+        "taa": 1770,
+        "held": 0
+      },
+      "private_bytes_mean": 13732973661.09091,
+      "movement": 0
+    },
+    "early_before_3": {
+      "quality_flags": [],
+      "seconds": 22.14182710647583,
+      "stereo_fps": 84.22972463074389,
+      "ms_per_pair": 11.87229335467873,
+      "delta": {
+        "presents": 1865,
+        "native": 0,
+        "fresh": 1865,
+        "rebuilt": 1865,
+        "accepted": 1865,
+        "refused": 0,
+        "taa": 1865,
+        "held": 0
+      },
+      "private_bytes_mean": 13619207447.272728,
+      "movement": 0
+    },
+    "early_before_4": {
+      "quality_flags": [],
+      "seconds": 21.118138074874878,
+      "stereo_fps": 87.2709513246669,
+      "ms_per_pair": 11.45856650834231,
+      "delta": {
+        "presents": 1843,
+        "native": 0,
+        "fresh": 1843,
+        "rebuilt": 1843,
+        "accepted": 1843,
+        "refused": 0,
+        "taa": 1843,
+        "held": 0
+      },
+      "private_bytes_mean": 14139065995.636364,
+      "movement": 0
+    },
+    "early_before_5": {
+      "quality_flags": [],
+      "seconds": 21.09461808204651,
+      "stereo_fps": 89.45409642689921,
+      "ms_per_pair": 11.178917902515373,
+      "delta": {
+        "presents": 1887,
+        "native": 0,
+        "fresh": 1887,
+        "rebuilt": 1887,
+        "accepted": 1887,
+        "refused": 0,
+        "taa": 1887,
+        "held": 0
+      },
+      "private_bytes_mean": 14002906391.272728,
+      "movement": 0
+    },
+    "early_before_native": {
+      "quality_flags": [],
+      "seconds": 22.07596492767334,
+      "stereo_fps": 56.80385904346349,
+      "ms_per_pair": 17.604437741366297,
+      "delta": {
+        "presents": 2509,
+        "native": 1254,
+        "fresh": 0,
+        "rebuilt": 0,
+        "accepted": 0,
+        "refused": 0,
+        "taa": 2509,
+        "held": 1254
+      },
+      "private_bytes_mean": 10858773281.391304,
+      "movement": 0
+    },
+    "early_before_native_b": {
+      "quality_flags": [],
+      "seconds": 22.080666065216064,
+      "stereo_fps": 58.37686219214994,
+      "ms_per_pair": 17.130074526932557,
+      "delta": {
+        "presents": 2577,
+        "native": 1289,
+        "fresh": 0,
+        "rebuilt": 0,
+        "accepted": 0,
+        "refused": 0,
+        "taa": 2577,
+        "held": 1289
+      },
+      "private_bytes_mean": 10909395130.181818,
+      "movement": 0
+    },
+    "early_final_0": {
+      "quality_flags": [],
+      "seconds": 21.079311847686768,
+      "stereo_fps": 58.20873133174176,
+      "ms_per_pair": 17.179553258098423,
+      "delta": {
+        "presents": 2455,
+        "native": 1227,
+        "fresh": 0,
+        "rebuilt": 0,
+        "accepted": 0,
+        "refused": 0,
+        "taa": 2455,
+        "held": 1227
+      },
+      "private_bytes_mean": 10891118592,
+      "movement": 0
+    },
+    "early_final_1": {
+      "quality_flags": [],
+      "seconds": 21.120931148529053,
+      "stereo_fps": 91.52058620931692,
+      "ms_per_pair": 10.926503439487352,
+      "delta": {
+        "presents": 1933,
+        "native": 0,
+        "fresh": 1933,
+        "rebuilt": 1933,
+        "accepted": 1933,
+        "refused": 0,
+        "taa": 1933,
+        "held": 0
+      },
+      "private_bytes_mean": 14226825588.363636,
+      "movement": 0
+    },
+    "early_final_2": {
+      "quality_flags": [],
+      "seconds": 21.1158709526062,
+      "stereo_fps": 93.91040532738484,
+      "ms_per_pair": 10.648447278167524,
+      "delta": {
+        "presents": 1983,
+        "native": 0,
+        "fresh": 1983,
+        "rebuilt": 1983,
+        "accepted": 1983,
+        "refused": 0,
+        "taa": 1983,
+        "held": 0
+      },
+      "private_bytes_mean": 13009791348.363636,
+      "movement": 0
+    },
+    "early_final_3": {
+      "quality_flags": [],
+      "seconds": 21.109708070755005,
+      "stereo_fps": 92.8956475109541,
+      "ms_per_pair": 10.764766991715964,
+      "delta": {
+        "presents": 1961,
+        "native": 0,
+        "fresh": 1961,
+        "rebuilt": 1961,
+        "accepted": 1961,
+        "refused": 0,
+        "taa": 1961,
+        "held": 0
+      },
+      "private_bytes_mean": 12702099642.181818,
+      "movement": 0
+    },
+    "early_final_4": {
+      "quality_flags": [],
+      "seconds": 21.117483139038086,
+      "stereo_fps": 93.19292394091825,
+      "ms_per_pair": 10.730428424307972,
+      "delta": {
+        "presents": 1968,
+        "native": 0,
+        "fresh": 1968,
+        "rebuilt": 1968,
+        "accepted": 1968,
+        "refused": 0,
+        "taa": 1968,
+        "held": 0
+      },
+      "private_bytes_mean": 12938894801.454546,
+      "movement": 0
+    },
+    "early_final_5": {
+      "quality_flags": [],
+      "seconds": 21.105440855026245,
+      "stereo_fps": 93.34085999586434,
+      "ms_per_pair": 10.713421753820429,
+      "delta": {
+        "presents": 1970,
+        "native": 0,
+        "fresh": 1970,
+        "rebuilt": 1970,
+        "accepted": 1970,
+        "refused": 0,
+        "taa": 1970,
+        "held": 0
+      },
+      "private_bytes_mean": 12669609053.09091,
+      "movement": 0
+    },
+    "early_motion_quality": {
+      "quality_flags": [],
+      "seconds": 56.28571009635925,
+      "stereo_fps": 87.58883900656143,
+      "ms_per_pair": 11.416979735569829,
+      "delta": {
+        "presents": 4930,
+        "native": 0,
+        "fresh": 4930,
+        "rebuilt": 4930,
+        "accepted": 4930,
+        "refused": 0,
+        "taa": 4930,
+        "held": 0
+      },
+      "private_bytes_mean": 13144070395.508772,
+      "movement": 1
+    },
+    "early_motion_ultra": {
+      "quality_flags": [],
+      "seconds": 57.31710410118103,
+      "stereo_fps": 91.00250408311405,
+      "ms_per_pair": 10.98870860835526,
+      "delta": {
+        "presents": 5216,
+        "native": 0,
+        "fresh": 5216,
+        "rebuilt": 5216,
+        "accepted": 5216,
+        "refused": 0,
+        "taa": 5216,
+        "held": 0
+      },
+      "private_bytes_mean": 12879839303.85965,
+      "movement": 1
+    }
+  },
+  "run_metadata": {
+    "early_ab_both_a": {
+      "movement": 0,
+      "mode": 2,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_ab_both_a",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_ab_both_b": {
+      "movement": 0,
+      "mode": 2,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_ab_both_b",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_ab_crop": {
+      "movement": 0,
+      "mode": 2,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_ab_crop",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_ab_legacy_a": {
+      "movement": 0,
+      "mode": 2,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_ab_legacy_a",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_ab_legacy_b": {
+      "movement": 0,
+      "mode": 2,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_ab_legacy_b",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_ab_scan": {
+      "movement": 0,
+      "mode": 2,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_ab_scan",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_after_1": {
+      "profile": "",
+      "dll_sha256": "5C04A2970FFECFD6380635BA1E309A96EC83D9FADD24CFEDDAD7688A038300F9",
+      "direct_color": -1,
+      "identity": -1,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "toolkit_requested": false,
+      "tag": "early_after_1",
+      "mode": 1,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0
+    },
+    "early_after_2": {
+      "profile": "",
+      "dll_sha256": "5C04A2970FFECFD6380635BA1E309A96EC83D9FADD24CFEDDAD7688A038300F9",
+      "direct_color": -1,
+      "identity": -1,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "toolkit_requested": false,
+      "tag": "early_after_2",
+      "mode": 2,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0
+    },
+    "early_after_3": {
+      "profile": "",
+      "dll_sha256": "5C04A2970FFECFD6380635BA1E309A96EC83D9FADD24CFEDDAD7688A038300F9",
+      "direct_color": -1,
+      "identity": -1,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "toolkit_requested": false,
+      "tag": "early_after_3",
+      "mode": 3,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0
+    },
+    "early_after_4": {
+      "profile": "",
+      "dll_sha256": "5C04A2970FFECFD6380635BA1E309A96EC83D9FADD24CFEDDAD7688A038300F9",
+      "direct_color": -1,
+      "identity": -1,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "toolkit_requested": false,
+      "tag": "early_after_4",
+      "mode": 4,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0
+    },
+    "early_after_5": {
+      "profile": "",
+      "dll_sha256": "5C04A2970FFECFD6380635BA1E309A96EC83D9FADD24CFEDDAD7688A038300F9",
+      "direct_color": -1,
+      "identity": -1,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "toolkit_requested": false,
+      "tag": "early_after_5",
+      "mode": 5,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0
+    },
+    "early_after_native": {
+      "profile": "",
+      "dll_sha256": "5C04A2970FFECFD6380635BA1E309A96EC83D9FADD24CFEDDAD7688A038300F9",
+      "direct_color": -1,
+      "identity": -1,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "toolkit_requested": false,
+      "tag": "early_after_native",
+      "mode": 0,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0
+    },
+    "early_after_native_b": {
+      "profile": "",
+      "dll_sha256": "5C04A2970FFECFD6380635BA1E309A96EC83D9FADD24CFEDDAD7688A038300F9",
+      "direct_color": -1,
+      "identity": -1,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "toolkit_requested": false,
+      "tag": "early_after_native_b",
+      "mode": 0,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0
+    },
+    "early_before_1": {
+      "tag": "early_before_1",
+      "mode": 1,
+      "toolkit_requested": false,
+      "dll_sha256": "553EFABC02E8B7DAF73729FF62EB182CE9840013E9C3C05EE368D7648C233ADE",
+      "identity": -1,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "direct_color": -1,
+      "profile": ""
+    },
+    "early_before_2": {
+      "tag": "early_before_2",
+      "mode": 2,
+      "toolkit_requested": false,
+      "dll_sha256": "553EFABC02E8B7DAF73729FF62EB182CE9840013E9C3C05EE368D7648C233ADE",
+      "identity": -1,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "direct_color": -1,
+      "profile": ""
+    },
+    "early_before_3": {
+      "tag": "early_before_3",
+      "mode": 3,
+      "toolkit_requested": false,
+      "dll_sha256": "553EFABC02E8B7DAF73729FF62EB182CE9840013E9C3C05EE368D7648C233ADE",
+      "identity": -1,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "direct_color": -1,
+      "profile": ""
+    },
+    "early_before_4": {
+      "tag": "early_before_4",
+      "mode": 4,
+      "toolkit_requested": false,
+      "dll_sha256": "553EFABC02E8B7DAF73729FF62EB182CE9840013E9C3C05EE368D7648C233ADE",
+      "identity": -1,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "direct_color": -1,
+      "profile": ""
+    },
+    "early_before_5": {
+      "tag": "early_before_5",
+      "mode": 5,
+      "toolkit_requested": false,
+      "dll_sha256": "553EFABC02E8B7DAF73729FF62EB182CE9840013E9C3C05EE368D7648C233ADE",
+      "identity": -1,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "direct_color": -1,
+      "profile": ""
+    },
+    "early_before_native": {
+      "tag": "early_before_native",
+      "mode": 0,
+      "toolkit_requested": false,
+      "dll_sha256": "553EFABC02E8B7DAF73729FF62EB182CE9840013E9C3C05EE368D7648C233ADE",
+      "identity": -1,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "direct_color": -1,
+      "profile": ""
+    },
+    "early_before_native_b": {
+      "tag": "early_before_native_b",
+      "mode": 0,
+      "toolkit_requested": false,
+      "dll_sha256": "553EFABC02E8B7DAF73729FF62EB182CE9840013E9C3C05EE368D7648C233ADE",
+      "identity": -1,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "movement": 0,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "direct_color": -1,
+      "profile": ""
+    },
+    "early_final_0": {
+      "movement": 0,
+      "mode": 0,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_final_0",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_final_1": {
+      "movement": 0,
+      "mode": 1,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_final_1",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_final_2": {
+      "movement": 0,
+      "mode": 2,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_final_2",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_final_3": {
+      "movement": 0,
+      "mode": 3,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_final_3",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_final_4": {
+      "movement": 0,
+      "mode": 4,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_final_4",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_final_5": {
+      "movement": 0,
+      "mode": 5,
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_final_5",
+      "direct_color": 0,
+      "profile": "",
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "identity": 0
+    },
+    "early_motion_quality": {
+      "movement": 1,
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "mode": 2,
+      "profile": "",
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "direct_color": 0,
+      "identity": 0,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_motion_quality"
+    },
+    "early_motion_ultra": {
+      "movement": 1,
+      "toolkit_requested": false,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "mode": 5,
+      "profile": "",
+      "runtime_manifest": "Q:/Modding Community/dishonored-2-dlss-afw/local/frame-profile/mock.json\r\n",
+      "direct_color": 0,
+      "identity": 0,
+      "toolkit_process_config": "before 0 rc 0 value 1\r\nbefore 1 rc 0 value 1\r\nbefore 2 rc 0 value 0\r\nwrite 0 rc 0 value 0\r\nwrite 1 rc 0 value 0\r\nwrite 2 rc 0 value 0\r\nafter 0 rc 2 value 0\r\nafter 1 rc 2 value 0\r\nafter 2 rc 2 value 0\r\nRestored original values\r\n",
+      "tag": "early_motion_ultra"
+    }
+  },
+  "sr_status": {
+    "early_ab_both_a": {
+      "mode": 2,
+      "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 6000/6003 prepared 12003 captured 12003 evaluated 12003 fallback 0 missingdepth 0 depthobserved 12010 lastdepth 18479 lastcapture 18479 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "compact": 1,
+      "fullscreen_scan": 1,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_ab_both_b": {
+      "mode": 2,
+      "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 9063/9066 prepared 18129 captured 18129 evaluated 18129 fallback 0 missingdepth 0 depthobserved 18140 lastdepth 24609 lastcapture 24609 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "compact": 1,
+      "fullscreen_scan": 1,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_ab_crop": {
+      "mode": 2,
+      "status": "dlsslive enabled 1 compact 1 fullscreenonly 0 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 2907/2910 prepared 5817 captured 5817 evaluated 5817 fallback 0 missingdepth 0 depthobserved 5820 lastdepth 12289 lastcapture 12289 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "compact": 1,
+      "fullscreen_scan": 0,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_ab_legacy_a": {
+      "mode": 2,
+      "status": "dlsslive enabled 1 compact 0 fullscreenonly 0 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 1411/1412 prepared 2823 captured 2823 evaluated 2823 fallback 0 missingdepth 0 depthobserved 2824 lastdepth 9293 lastcapture 9293 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "compact": 0,
+      "fullscreen_scan": 0,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_ab_legacy_b": {
+      "mode": 2,
+      "status": "dlsslive enabled 1 compact 0 fullscreenonly 0 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 7490/7494 prepared 14984 captured 14984 evaluated 14984 fallback 0 missingdepth 0 depthobserved 14993 lastdepth 21462 lastcapture 21462 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "compact": 0,
+      "fullscreen_scan": 0,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_ab_scan": {
+      "mode": 2,
+      "status": "dlsslive enabled 1 compact 0 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 4448/4452 prepared 8900 captured 8900 evaluated 8900 fallback 0 missingdepth 0 depthobserved 8905 lastdepth 15374 lastcapture 15374 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "compact": 0,
+      "fullscreen_scan": 1,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_final_0": {
+      "mode": 0,
+      "status": "dlsslive enabled 0 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 0 quality 0 requestedpreset 0 viewport 3286x3555 output 3286x3555 eyes 17083/17087 prepared 31035 captured 34170 evaluated 34170 fallback 0 missingdepth 0 depthobserved 34186 lastdepth 40655 lastcapture 40655 reason disabled",
+      "compact": 1,
+      "fullscreen_scan": 1,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_final_1": {
+      "mode": 1,
+      "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 0 requestedpreset 0 viewport 3286x3555 output 3286x3555 eyes 17000/17003 prepared 31035 captured 34003 evaluated 34003 fallback 0 missingdepth 0 depthobserved 34019 lastdepth 40488 lastcapture 40488 reason DLAA diagnostic ready; original TAA retained for fallback history",
+      "compact": 1,
+      "fullscreen_scan": 1,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_final_2": {
+      "mode": 2,
+      "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 15427/15430 prepared 30857 captured 30857 evaluated 30857 fallback 0 missingdepth 0 depthobserved 30872 lastdepth 37341 lastcapture 37341 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "compact": 1,
+      "fullscreen_scan": 1,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_final_3": {
+      "mode": 3,
+      "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 2 requestedpreset 0 viewport 1906x2062 output 3286x3555 eyes 13834/13837 prepared 27671 captured 27671 evaluated 27671 fallback 0 missingdepth 0 depthobserved 27685 lastdepth 34154 lastcapture 34154 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "compact": 1,
+      "fullscreen_scan": 1,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_final_4": {
+      "mode": 4,
+      "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 3 requestedpreset 0 viewport 1643x1778 output 3286x3555 eyes 12239/12241 prepared 24480 captured 24480 evaluated 24480 fallback 0 missingdepth 0 depthobserved 24493 lastdepth 30962 lastcapture 30962 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "compact": 1,
+      "fullscreen_scan": 1,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_final_5": {
+      "mode": 5,
+      "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 4 requestedpreset 0 viewport 1095x1185 output 3286x3555 eyes 10649/10653 prepared 21302 captured 21302 evaluated 21302 fallback 0 missingdepth 0 depthobserved 21314 lastdepth 27783 lastcapture 27783 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "compact": 1,
+      "fullscreen_scan": 1,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F"
+    },
+    "early_motion_quality": {
+      "mode": 2,
+      "compact": 1,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 29167/29178 prepared 55210 captured 58345 evaluated 58345 fallback 0 missingdepth 0 depthobserved 58372 lastdepth 72586 lastcapture 72586 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "fullscreen_scan": 1
+    },
+    "early_motion_ultra": {
+      "mode": 5,
+      "compact": 1,
+      "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+      "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 4 requestedpreset 0 viewport 1095x1185 output 3286x3555 eyes 32323/32333 prepared 61521 captured 64656 evaluated 64656 fallback 0 missingdepth 0 depthobserved 64684 lastdepth 78898 lastcapture 78898 reason DLSS SR diagnostic evaluating; native TAA cost retained",
+      "fullscreen_scan": 1
+    }
+  },
+  "gpu": {
+    "gpu_mode_3": {
+      "metrics": {
+        "FrameTime": {
+          "n": 1210,
+          "mean": 10.707767438016528,
+          "median": 10.60465,
+          "p95": 11.8635,
+          "p99": 12.4565,
+          "max": 18.0441
+        },
+        "CPUBusy": {
+          "n": 1210,
+          "mean": 10.639060247933884,
+          "median": 10.53545,
+          "p95": 11.7961,
+          "p99": 12.3752,
+          "max": 17.9807
+        },
+        "CPUWait": {
+          "n": 1210,
+          "mean": 0.06870719008264463,
+          "median": 0.0645,
+          "p95": 0.0915,
+          "p99": 0.1395,
+          "max": 0.2196
+        },
+        "GPUTime": {
+          "n": 1210,
+          "mean": 7.823164214876033,
+          "median": 7.59235,
+          "p95": 10.3791,
+          "p99": 11.2961,
+          "max": 15.3436
+        },
+        "GPUBusy": {
+          "n": 1210,
+          "mean": 6.667716363636363,
+          "median": 6.73055,
+          "p95": 7.4029,
+          "p99": 7.5886,
+          "max": 7.8683
+        },
+        "GPUWait": {
+          "n": 1210,
+          "mean": 1.1554478512396693,
+          "median": 0.8706,
+          "p95": 3.5084,
+          "p99": 4.5045,
+          "max": 7.8174
+        }
+      },
+      "metadata": {
+        "mode": 3,
+        "fullscreen_scan": 1,
+        "compact": 1,
+        "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+        "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 2 requestedpreset 0 viewport 1906x2062 output 3286x3555 eyes 20257/20265 prepared 37387 captured 40522 evaluated 40522 fallback 0 missingdepth 0 depthobserved 40542 lastdepth 54756 lastcapture 54756 reason DLSS SR diagnostic evaluating; native TAA cost retained"
+      }
+    },
+    "gpu_mode_4": {
+      "metrics": {
+        "FrameTime": {
+          "n": 1202,
+          "mean": 10.79493710482529,
+          "median": 10.663350000000001,
+          "p95": 11.9689,
+          "p99": 12.72,
+          "max": 17.9141
+        },
+        "CPUBusy": {
+          "n": 1202,
+          "mean": 10.726474792013311,
+          "median": 10.59145,
+          "p95": 11.906,
+          "p99": 12.6354,
+          "max": 17.8522
+        },
+        "CPUWait": {
+          "n": 1202,
+          "mean": 0.06846231281198004,
+          "median": 0.0644,
+          "p95": 0.0902,
+          "p99": 0.1299,
+          "max": 0.411
+        },
+        "GPUTime": {
+          "n": 1202,
+          "mean": 7.865912063227953,
+          "median": 7.7509,
+          "p95": 9.6151,
+          "p99": 10.5849,
+          "max": 13.4318
+        },
+        "GPUBusy": {
+          "n": 1202,
+          "mean": 6.929617886855241,
+          "median": 6.97425,
+          "p95": 7.6199,
+          "p99": 7.8414,
+          "max": 8.0962
+        },
+        "GPUWait": {
+          "n": 1202,
+          "mean": 0.9362941763727122,
+          "median": 0.71955,
+          "p95": 2.5463,
+          "p99": 3.6858,
+          "max": 7.5416
+        }
+      },
+      "metadata": {
+        "mode": 4,
+        "fullscreen_scan": 1,
+        "compact": 1,
+        "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+        "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 3 requestedpreset 0 viewport 1643x1778 output 3286x3555 eyes 21347/21354 prepared 39566 captured 42701 evaluated 42701 fallback 0 missingdepth 0 depthobserved 42722 lastdepth 56936 lastcapture 56936 reason DLSS SR diagnostic evaluating; native TAA cost retained"
+      }
+    },
+    "gpu_mode_5": {
+      "metrics": {
+        "FrameTime": {
+          "n": 1197,
+          "mean": 10.837438680033417,
+          "median": 10.7154,
+          "p95": 12.2288,
+          "p99": 12.8759,
+          "max": 15.284
+        },
+        "CPUBusy": {
+          "n": 1197,
+          "mean": 10.768580033416876,
+          "median": 10.6372,
+          "p95": 12.1649,
+          "p99": 12.8078,
+          "max": 15.2052
+        },
+        "CPUWait": {
+          "n": 1197,
+          "mean": 0.06885864661654136,
+          "median": 0.0645,
+          "p95": 0.0922,
+          "p99": 0.1348,
+          "max": 0.3456
+        },
+        "GPUTime": {
+          "n": 1197,
+          "mean": 7.776594068504595,
+          "median": 7.6517,
+          "p95": 9.6488,
+          "p99": 10.7523,
+          "max": 11.9426
+        },
+        "GPUBusy": {
+          "n": 1197,
+          "mean": 6.281934753550543,
+          "median": 6.2743,
+          "p95": 7.0693,
+          "p99": 7.2769,
+          "max": 7.5428
+        },
+        "GPUWait": {
+          "n": 1197,
+          "mean": 1.4946593149540517,
+          "median": 1.3949,
+          "p95": 3.2275,
+          "p99": 4.5216,
+          "max": 5.0479
+        }
+      },
+      "metadata": {
+        "mode": 5,
+        "fullscreen_scan": 1,
+        "compact": 1,
+        "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+        "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 4 requestedpreset 0 viewport 1095x1185 output 3286x3555 eyes 22438/22445 prepared 41748 captured 44883 evaluated 44883 fallback 0 missingdepth 0 depthobserved 44905 lastdepth 59119 lastcapture 59119 reason DLSS SR diagnostic evaluating; native TAA cost retained"
+      }
+    },
+    "gpu_quality_crop_a": {
+      "metrics": {
+        "FrameTime": {
+          "n": 1209,
+          "mean": 10.729868982630274,
+          "median": 10.6438,
+          "p95": 11.945,
+          "p99": 12.5783,
+          "max": 13.3176
+        },
+        "CPUBusy": {
+          "n": 1209,
+          "mean": 10.66176046319272,
+          "median": 10.5709,
+          "p95": 11.8754,
+          "p99": 12.5167,
+          "max": 13.2451
+        },
+        "CPUWait": {
+          "n": 1209,
+          "mean": 0.0681085194375517,
+          "median": 0.0635,
+          "p95": 0.0917,
+          "p99": 0.1467,
+          "max": 0.5635
+        },
+        "GPUTime": {
+          "n": 1209,
+          "mean": 7.85036393713813,
+          "median": 7.6599,
+          "p95": 10.0684,
+          "p99": 10.9027,
+          "max": 11.893
+        },
+        "GPUBusy": {
+          "n": 1209,
+          "mean": 6.874432009925559,
+          "median": 6.9341,
+          "p95": 7.5741,
+          "p99": 7.8448,
+          "max": 8.3822
+        },
+        "GPUWait": {
+          "n": 1209,
+          "mean": 0.9759319272125724,
+          "median": 0.7129,
+          "p95": 3.103,
+          "p99": 4.0299,
+          "max": 5.0033
+        }
+      },
+      "metadata": {
+        "mode": 2,
+        "fullscreen_scan": 1,
+        "compact": 1,
+        "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+        "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 19166/19173 prepared 35204 captured 38339 evaluated 38339 fallback 0 missingdepth 0 depthobserved 38358 lastdepth 52572 lastcapture 52572 reason DLSS SR diagnostic evaluating; native TAA cost retained"
+      }
+    },
+    "gpu_quality_crop_b": {
+      "metrics": {
+        "FrameTime": {
+          "n": 1202,
+          "mean": 10.78479459234609,
+          "median": 10.6461,
+          "p95": 12.003,
+          "p99": 12.544,
+          "max": 13.9963
+        },
+        "CPUBusy": {
+          "n": 1202,
+          "mean": 10.715990931780366,
+          "median": 10.581399999999999,
+          "p95": 11.9202,
+          "p99": 12.4808,
+          "max": 13.9351
+        },
+        "CPUWait": {
+          "n": 1202,
+          "mean": 0.06880366056572379,
+          "median": 0.0643,
+          "p95": 0.0884,
+          "p99": 0.1356,
+          "max": 0.491
+        },
+        "GPUTime": {
+          "n": 1202,
+          "mean": 7.935397753743761,
+          "median": 7.74145,
+          "p95": 10.0973,
+          "p99": 10.8897,
+          "max": 13.584
+        },
+        "GPUBusy": {
+          "n": 1202,
+          "mean": 6.968617054908486,
+          "median": 7.0447,
+          "p95": 7.6146,
+          "p99": 7.8237,
+          "max": 8.115
+        },
+        "GPUWait": {
+          "n": 1202,
+          "mean": 0.9667806988352745,
+          "median": 0.67945,
+          "p95": 3.0217,
+          "p99": 3.9895,
+          "max": 6.4727
+        }
+      },
+      "metadata": {
+        "mode": 2,
+        "fullscreen_scan": 1,
+        "compact": 1,
+        "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+        "status": "dlsslive enabled 1 compact 1 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 24554/24564 prepared 45983 captured 49118 evaluated 49118 fallback 0 missingdepth 0 depthobserved 49144 lastdepth 63358 lastcapture 63358 reason DLSS SR diagnostic evaluating; native TAA cost retained"
+      }
+    },
+    "gpu_quality_full_a": {
+      "metrics": {
+        "FrameTime": {
+          "n": 1176,
+          "mean": 11.014987414965987,
+          "median": 10.94235,
+          "p95": 12.2414,
+          "p99": 12.8342,
+          "max": 14.755
+        },
+        "CPUBusy": {
+          "n": 1176,
+          "mean": 10.94537899659864,
+          "median": 10.87495,
+          "p95": 12.177,
+          "p99": 12.7638,
+          "max": 14.6932
+        },
+        "CPUWait": {
+          "n": 1176,
+          "mean": 0.06960841836734694,
+          "median": 0.0646,
+          "p95": 0.0935,
+          "p99": 0.1534,
+          "max": 0.5927
+        },
+        "GPUTime": {
+          "n": 1176,
+          "mean": 8.090582738095238,
+          "median": 7.90335,
+          "p95": 10.1171,
+          "p99": 11.2088,
+          "max": 12.0669
+        },
+        "GPUBusy": {
+          "n": 1176,
+          "mean": 7.086707738095238,
+          "median": 7.136699999999999,
+          "p95": 7.822,
+          "p99": 7.9549,
+          "max": 8.2549
+        },
+        "GPUWait": {
+          "n": 1176,
+          "mean": 1.003875,
+          "median": 0.73765,
+          "p95": 2.8567,
+          "p99": 4.01,
+          "max": 5.5543
+        }
+      },
+      "metadata": {
+        "mode": 2,
+        "fullscreen_scan": 1,
+        "compact": 0,
+        "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+        "status": "dlsslive enabled 1 compact 0 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 18096/18100 prepared 33061 captured 36196 evaluated 36196 fallback 0 missingdepth 0 depthobserved 36213 lastdepth 50427 lastcapture 50427 reason DLSS SR diagnostic evaluating; native TAA cost retained"
+      }
+    },
+    "gpu_quality_full_b": {
+      "metrics": {
+        "FrameTime": {
+          "n": 1195,
+          "mean": 10.84996108786611,
+          "median": 10.7298,
+          "p95": 12.0548,
+          "p99": 12.8396,
+          "max": 16.6548
+        },
+        "CPUBusy": {
+          "n": 1195,
+          "mean": 10.780242677824267,
+          "median": 10.663,
+          "p95": 11.9824,
+          "p99": 12.7596,
+          "max": 16.5936
+        },
+        "CPUWait": {
+          "n": 1195,
+          "mean": 0.069718410041841,
+          "median": 0.0645,
+          "p95": 0.0917,
+          "p99": 0.1614,
+          "max": 0.4465
+        },
+        "GPUTime": {
+          "n": 1195,
+          "mean": 8.006694895397489,
+          "median": 7.8267,
+          "p95": 10.2214,
+          "p99": 11.1392,
+          "max": 12.4149
+        },
+        "GPUBusy": {
+          "n": 1195,
+          "mean": 7.128233138075314,
+          "median": 7.1927,
+          "p95": 7.81,
+          "p99": 8.0562,
+          "max": 8.669
+        },
+        "GPUWait": {
+          "n": 1195,
+          "mean": 0.8784617573221757,
+          "median": 0.6175,
+          "p95": 2.9348,
+          "p99": 3.8041,
+          "max": 6.1867
+        }
+      },
+      "metadata": {
+        "mode": 2,
+        "fullscreen_scan": 1,
+        "compact": 0,
+        "dll_sha256": "37B9483EA3D3E591591BCD802D1C233E12248EC42AAC8E6AFCBE8C73C62D8F8F",
+        "status": "dlsslive enabled 1 compact 0 fullscreenonly 1 directcolor 0 directframes 0 ready 1 quality 1 requestedpreset 0 viewport 2191x2370 output 3286x3555 eyes 23493/23502 prepared 43860 captured 46995 evaluated 46995 fallback 0 missingdepth 0 depthobserved 47019 lastdepth 61233 lastcapture 61233 reason DLSS SR diagnostic evaluating; native TAA cost retained"
+      }
+    }
+  },
+  "pass_audit": {
+    "native": {
+      "draws": {
+        "('3286x3555', 'geometry')": 11115,
+        "('512x512', 'geometry')": 5115,
+        "('3286x3555', 'fullscreen')": 738,
+        "('128x128', 'geometry')": 396,
+        "('64x64', 'fullscreen')": 177,
+        "('128x128', 'fullscreen')": 137,
+        "('822x889', 'fullscreen')": 115,
+        "('822x889', 'geometry')": 110,
+        "('512x512', 'fullscreen')": 109,
+        "('1024x1024', 'geometry')": 45,
+        "('256x256', 'fullscreen')": 21,
+        "('821x888', 'fullscreen')": 18,
+        "('1643x1778', 'fullscreen')": 6,
+        "('1024x1024', 'fullscreen')": 6,
+        "('103x111', 'fullscreen')": 6,
+        "('821x889', 'fullscreen')": 6,
+        "('410x444', 'fullscreen')": 3,
+        "('205x222', 'fullscreen')": 3,
+        "('102x111', 'fullscreen')": 3,
+        "('51x55', 'fullscreen')": 3,
+        "('25x27', 'fullscreen')": 3,
+        "('12x13', 'fullscreen')": 3,
+        "('6x6', 'fullscreen')": 3,
+        "('3x3', 'fullscreen')": 3,
+        "('1x1', 'fullscreen')": 3,
+        "('411x444', 'fullscreen')": 3,
+        "('821x888', 'geometry')": 3
+      },
+      "dispatch": {
+        "768x1x1": 18,
+        "206x223x1": 12,
+        "1x1x1": 8,
+        "32x32x1": 6,
+        "13x1x1": 6,
+        "4x1x1": 3,
+        "1x111x1": 3,
+        "128x1x1": 3,
+        "1x1x32": 3,
+        "8x1x1": 3,
+        "411x445x1": 3,
+        "64x64x1": 3
+      }
+    },
+    "ultra": {
+      "draws": {
+        "('1095x1185', 'geometry')": 10633,
+        "('512x512', 'geometry')": 5089,
+        "('1095x1185', 'fullscreen')": 710,
+        "('128x128', 'geometry')": 396,
+        "('64x64', 'fullscreen')": 177,
+        "('128x128', 'fullscreen')": 137,
+        "('274x297', 'geometry')": 112,
+        "('274x297', 'fullscreen')": 110,
+        "('512x512', 'fullscreen')": 107,
+        "('1024x1024', 'geometry')": 51,
+        "('3286x3555', 'fullscreen')": 21,
+        "('256x256', 'fullscreen')": 21,
+        "('274x296', 'fullscreen')": 18,
+        "('3286x3555', 'geometry')": 12,
+        "('821x888', 'fullscreen')": 6,
+        "('1024x1024', 'fullscreen')": 6,
+        "('34x37', 'fullscreen')": 6,
+        "('822x889', 'fullscreen')": 6,
+        "('1643x1778', 'fullscreen')": 3,
+        "('410x444', 'fullscreen')": 3,
+        "('205x222', 'fullscreen')": 3,
+        "('102x111', 'fullscreen')": 3,
+        "('51x55', 'fullscreen')": 3,
+        "('25x27', 'fullscreen')": 3,
+        "('12x13', 'fullscreen')": 3,
+        "('6x6', 'fullscreen')": 3,
+        "('3x3', 'fullscreen')": 3,
+        "('1x1', 'fullscreen')": 3,
+        "('137x148', 'fullscreen')": 3,
+        "('274x296', 'geometry')": 3,
+        "('548x593', 'fullscreen')": 3
+      },
+      "dispatch": {
+        "768x1x1": 18,
+        "69x75x1": 12,
+        "1x1x1": 9,
+        "32x32x1": 6,
+        "13x1x1": 6,
+        "4x1x1": 3,
+        "1x111x1": 3,
+        "128x1x1": 3,
+        "1x1x32": 3,
+        "8x1x1": 3,
+        "411x445x1": 3,
+        "64x64x1": 3
+      }
+    }
+  }
+}

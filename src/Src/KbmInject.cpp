@@ -1,3 +1,4 @@
+#include "FrameProfile.h"
 #include "pch.h"
 #include "KbmInject.h"
 #include "VRRuntime.h"
@@ -38,7 +39,7 @@ namespace
     constexpr float kRefSensitivity = 0.808f;
     float g_SensScale = 1.f; bool g_InvertY = false;
     void ReadMouseSettings()
-    {
+    { DVR_PROFILE("input.ReadMouseSettings");
         static float lastSens = -1.f; static int lastInv = -1;
         float sens = CVars::GetFloat("g_mouseSensitivity", kRefSensitivity);
         if (!(sens > 0.01f)) sens = kRefSensitivity;          // also catches NaN
@@ -303,7 +304,7 @@ namespace
             in.ki.dwFlags = KEYEVENTF_SCANCODE | (down ? 0 : KEYEVENTF_KEYUP) | (b.ext ? KEYEVENTF_EXTENDEDKEY : 0);
         }
         else return;
-        SendInput(1, &in, sizeof in);
+        { DVR_PROFILE("input.SendInput"); SendInput(1, &in, sizeof in); }
         std::lock_guard lk(g_M); g_Stats.keyEvents++;
     }
     void SendKey(Slot s, bool down)
@@ -390,7 +391,7 @@ namespace
     {
         if (!dx && !dy) return;
         INPUT in{}; in.type = INPUT_MOUSE; in.mi.dx = dx; in.mi.dy = dy; in.mi.dwFlags = MOUSEEVENTF_MOVE;
-        SendInput(1, &in, sizeof in);
+        { DVR_PROFILE("input.SendInput"); SendInput(1, &in, sizeof in); }
         std::lock_guard lk(g_M); g_Stats.mouseEvents++; g_Stats.lastDx = (float)dx;
     }
 
@@ -474,7 +475,7 @@ namespace
     //! Head aim: the servo that turns the game to the head, the stick's turns, the calibration, and the mouse counts
     //! that carry them. Every mode that plays (play, the wheel, a cutscene) ends here; a menu does not.
     void HeadAimServo(const XRInputState& in)
-    {
+    { DVR_PROFILE("input.HeadAimServo");
         // Head aim: make the game's look angles follow the HMD (yaw & pitch) via mouse deltas, so the
         // crosshair / weapons aim where the player looks. ViewMatrixHook then keeps the game axis.
         float bodyYaw = 0; bool haveBody = false; float headYawNow = 0; bool haveHeadYaw = false;
@@ -749,7 +750,7 @@ namespace
 }
 
 void KbmInject::Tick()
-{
+{ DVR_PROFILE("KbmInject.KbmInject::Tick");
     Psvr2Triggers::Frame triggerFrame; // Every early return publishes Off.
     g_Frame++;
     {
