@@ -27,7 +27,8 @@ $readme+="`r`nInstaller: use the Play Dishonored 2 VR shortcut for automatic sta
 [IO.File]::WriteAllText("$payload\DVR_Docs\README.txt",$readme)
 $notice="Third-party software in Dishonored 2 VR`r`n"
 foreach($dep in 'detours','fmt','imgui','openxr-loader','jsoncpp'){
- $copyright="$repo\build\vcpkg_installed\x64-windows-static\share\$dep\copyright"
+ $installed = ((Get-Content "$BuildDir/CMakeCache.txt" | Where-Object { $_ -like 'VCPKG_INSTALLED_DIR:PATH=*' }) -replace '^VCPKG_INSTALLED_DIR:PATH=','')
+ $copyright="$installed\x64-windows-static\share\$dep\copyright"
  if(-not(Test-Path $copyright)){throw "Missing license: $copyright"}
  $notice+="`r`n==== $dep ====`r`n"+(Get-Content $copyright -Raw)
 }
