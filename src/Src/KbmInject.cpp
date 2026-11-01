@@ -80,6 +80,9 @@ namespace
     // screen a stray click lands on an existing save, and the next one confirms overwriting it.
     // 1 restores the old behaviour, for driving a menu from the controllers on purpose.
     std::atomic<int> g_MenuInput{ 0 };
+    std::atomic<bool> g_SimulatorMode{ false };
+    std::atomic<bool> g_SimulatorYawValid{ false };
+    std::atomic<float> g_SimulatorYaw{ 0.f };
     bool g_MenuSafe = false;                      //!< this tick is inside a menu and injection is suppressed
     // Auto-calibration: inject a known delta and measure the player's yaw change. It RETRIES, because the useful
     // moment to ask for it is when the VR mode is switched on, which is often a menu or a load screen -- there is
@@ -772,7 +775,19 @@ void KbmInject::Tick()
     }
     { std::lock_guard lk(g_M); g_Stats.ticks++; }
     XRInputState in;
-    if (!g_Enabled.load()) { ReleaseAll(); return; }
+    if (!g_Enabled.load()) {
+        ReleaseAll();
+        // The simulator drives XInput, not SendInput. Its harness explicitly selects
+        // play only after verifying the loaded scene; default to the menu gate.
+        if (g_SimulatorMode.load()) {
+            std::lock_guard lk(g_M);
+            const bool play = g_MenuInput.load() != 0;
+            g_Stats.mode = play ? 0 : 1;
+            g_Stats.menuSafe = !play;
+            g_Stats.simulating = g_Simulating;
+        }
+        return;
+    }
     if (!VRRuntime::GetInput(in))
     {
         Overlay::ControllerLost();
@@ -1306,6 +1321,7 @@ bool KbmInject::Possessing() { return g_Possessing.load(); }
 void KbmInject::ReleaseAll() { LiveWheel::Cancel(); for (int i = 0; i < kCount; i++) if (g_Held[i]) { g_TapUntil[i] = 0; g_Held[i] = false; SendKey((Slot)i, false); } g_SprintLatch = false; }
 void KbmInject::SetEnabled(bool on) { g_Enabled = on; if (!on) ReleaseAll(); }
 bool KbmInject::Enabled() { return g_Enabled; }
+void KbmInject::SetSimulatorMode(bool on) { g_SimulatorMode = on; }
 void KbmInject::SetSnapAngle(float d) { g_SnapDeg = d; }
 void KbmInject::SetMouseCountsPerDegree(float c) { g_CountsPerDeg = c / g_SensScale; }   // c: at the current sensitivity
 void KbmInject::SetHeadAim(bool on) { g_HeadAim = on; g_HeadValid = false; }
@@ -1314,12 +1330,29 @@ void KbmInject::Calibrate() { g_CalState = 1; g_CalTries = kCalMaxTries; g_CalDe
 bool KbmInject::HeadAim() { return g_HeadAim; }
 bool KbmInject::WorldYawOffset(float& deg)
 {
+    if (g_SimulatorMode.load()) {
+        if (!g_SimulatorYawValid.load(std::memory_order_acquire)) return false;
+        deg = g_SimulatorYaw.load(std::memory_order_relaxed); return true;
+    }
     if (!g_HeadAim.load() || !g_ServoValid || !g_HeadValid) return false;
     deg = g_DesiredYaw - g_LastHeadYaw;
     return true;
 }
 float KbmInject::StickTurnTotal() { return g_StickTurn.load(); }
-void KbmInject::SetMenuInput(int m) { g_MenuInput = m; }
+void KbmInject::SetMenuInput(int m) {
+    if (g_SimulatorMode.load()) {
+        g_SimulatorYawValid.store(false, std::memory_order_release);
+        float o[3], a[9]; const auto hp = VRRuntime::GetServoHeadPose();
+        if (m && hp.valid && Game::PlayerView(o, a)) {
+            const float x=hp.quat[0], y=hp.quat[1], z=hp.quat[2], w=hp.quat[3];
+            const float headYaw=atan2f(2*(x*z+y*w), 1-2*(x*x+y*y))*57.29578f;
+            // Seed the same room-to-game yaw reference without sending mouse input.
+            g_SimulatorYaw.store(atan2f(a[1],a[0])*57.29578f-headYaw, std::memory_order_relaxed);
+            g_SimulatorYawValid.store(true, std::memory_order_release);
+        }
+    }
+    g_MenuInput = m;
+}
 int KbmInject::MenuInput() { return g_MenuInput; }
 void KbmInject::SetTurnSpeed(float d) { g_TurnSpeed = d; }
 float KbmInject::TurnSpeed() { return g_TurnSpeed; }

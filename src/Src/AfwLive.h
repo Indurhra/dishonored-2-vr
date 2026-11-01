@@ -5,6 +5,7 @@
 namespace AfwLive {
 void Enable(bool);
 bool Enabled();
+bool TransientFailure(); // missing matched inputs; never backend/frustum/validation failures
 void Fallback(); // retain the failure reason for the VR menu
 std::string Message();
 void Target(unsigned long long,const float*,const ViewMatrixHook::XrPose&);

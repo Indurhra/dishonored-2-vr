@@ -4,6 +4,8 @@
 #endif
 #include "DlssLive.h"
 #include "DlssRecovery.h"
+#include "DlssColorPool.h"
+#include "CVars.h"
 #include "DlssStageTiming.h"
 #include "TemporalBoundary.h"
 #include "GameInfo.h"
@@ -14,6 +16,7 @@
 #include <sstream>
 #include <fstream>
 #include <array>
+#include <algorithm>
 #include <vector>
 #include <cmath>
 #include <wrl/client.h>
@@ -31,11 +34,38 @@ std::atomic<unsigned> preset{0};
 std::atomic<UINT> activeWidth{0},activeHeight{0},outputWidth{0},outputHeight{0};
 std::atomic<unsigned long long> eyeEvaluated[2]{},prepared{0};
 std::atomic<bool> enabled{false},ready{false};std::atomic<unsigned long long> epoch{1},captured{0},evaluated{0},fallback{0},missingDepth{0},depthObserved{0},lastDepthSerial{0},lastCaptureSerial{0};
+std::atomic<bool> softRecovery{false},transientFailure{false};
+std::atomic<unsigned> backendInitializations{0};
 RecoveryBudget recovery;std::atomic<bool> resetRecovery{false};std::atomic<unsigned> recoveryCount{0};
 std::mutex depthMutex,statusMutex;std::string problem="disabled";
 void Problem(const std::string& text){std::lock_guard lock(statusMutex);problem=text;}
+// DLSS obtains its guides from the native temporal pass. The game's AA menu can
+// remove that pass independently of the VR renderer selection. Own only the live
+// numeric values; preserve the player's latest choice for native rendering.
+bool aaOwned=false;int savedAa=3,savedSkip=0;
+std::atomic<unsigned> aaRepairs{0};
+bool HoldTemporalInputs() {
+ if(!CVars::Address("r_AntiAliasingPreset")||!CVars::Address("r_skipTemporalAA"))return false;
+ const int aa=CVars::GetInt("r_AntiAliasingPreset"),skip=CVars::GetInt("r_skipTemporalAA");
+ if(!enabled){
+  if(aaOwned){
+   if(aa==3)CVars::SetInt("r_AntiAliasingPreset",savedAa);
+   if(skip==0)CVars::SetInt("r_skipTemporalAA",savedSkip);
+   aaOwned=false;
+  }
+  return false;
+ }
+ if(!aaOwned){savedAa=aa;savedSkip=skip;aaOwned=true;}
+ else {if(aa!=3)savedAa=aa;if(skip!=0)savedSkip=skip;}
+ if(aa==3&&skip==0)return false;
+ CVars::SetInt("r_AntiAliasingPreset",3);CVars::SetInt("r_skipTemporalAA",0);
+ ++aaRepairs;ready=false;++epoch;recovery.Reset();
+ Problem("Restoring temporal inputs after game anti-aliasing changed");
+ return true;
+}
 void FailStage(const std::string& cause,bool transient) {
  const bool retry=transient&&recovery.Retry();
+ transientFailure=transient;softRecovery=retry;
  std::ofstream diagnostic(GameInfo::GameDir()+L"\\DVR_dlss_failure.txt",std::ios::app);
  diagnostic<<"tick "<<GetTickCount64()<<" retry "<<retry<<" attempt "<<recovery.retries<<" cause "<<cause<<" | "<<Status()<<"\n";
  ready=false;++epoch;
@@ -47,7 +77,7 @@ struct Depth {unsigned long long serial=0,epoch=0;int eye=-1;ComPtr<ID3D11Textur
 std::array<Depth,16> depths;
 const GUID depthKey={0xe40eec21,0x71aa,0x47ef,{0x8b,0x36,0x42,0x15,0x23,0x72,0x81,0x19}};
 struct Tone {unsigned long long serial=0,epoch=0;int eye=-1;UINT width=0,height=0;ComPtr<ID3D11Resource> color;};
-std::array<Tone,16> tones;
+std::array<std::vector<Tone>,16> tones; // bounded colour-write records per view
 struct DepthList final:IUnknown {
  std::atomic<ULONG> refs{1};std::vector<Depth> entries;std::vector<Tone> tones;
  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** out)override{if(!out)return E_POINTER;*out=nullptr;if(id!=__uuidof(IUnknown))return E_NOINTERFACE;*out=this;AddRef();return S_OK;}
@@ -56,7 +86,9 @@ struct DepthList final:IUnknown {
 ComPtr<DepthList> DepthData(ID3D11DeviceChild* object){IUnknown* raw=nullptr;UINT bytes=sizeof(raw);ComPtr<DepthList> data;if(SUCCEEDED(object->GetPrivateData(depthKey,&bytes,&raw))&&raw)data.Attach(static_cast<DepthList*>(raw));return data;}
 
 #ifdef DVR_HAS_NGX
+DlssColorPool& ColorPool(){static auto* pool=new DlssColorPool;return *pool;}
 struct Batch final:IUnknown {
+ DlssColorPool::Lease colorLease;
  std::atomic<ULONG> refs{1};ComPtr<ID3D11Texture2D> color,motion,depth,linearDepth;
  ComPtr<ID3D11ShaderResourceView> depthSrv;ComPtr<ID3D11UnorderedAccessView> depthUav,result;
  // Stamp dimensions identify the engine allocation. Active dimensions are the
@@ -124,12 +156,14 @@ void SetDirectColor(bool on){directColor=on;}
 void SetCompactInputs(bool on){if(compactInputs.exchange(on)!=on){ready=false;++epoch;}}
 void SetFullscreenScan(bool on){fullscreenScan=on;}
 bool FullscreenScan(){return fullscreenScan.load(std::memory_order_relaxed);}
-void SetEnabled(bool on){if(!on && !enabled)return;if(on)resetRecovery=true;enabled=on;ready=false;++epoch;TemporalBoundary::SetEnabled(on);Problem(on?"awaiting render-lane initialization":"disabled");}
+void SetEnabled(bool on){softRecovery=false;transientFailure=false;if(!on && !enabled)return;if(on)resetRecovery=true;enabled=on;ready=false;++epoch;TemporalBoundary::SetEnabled(on);Problem(on?"awaiting render-lane initialization":"disabled");}
 bool Enabled(){return enabled.load();}
+bool TransientFailure(){return transientFailure.load();}
+unsigned BackendInitializations(){return backendInitializations.load();}
 unsigned long long Generation(){return epoch.load();}
-void SetQuality(int q){quality=(q>=0&&q<=4)?q:0;ready=false;++epoch;}
+void SetQuality(int q){softRecovery=false;quality=(q>=0&&q<=4)?q:0;ready=false;++epoch;}
 int Quality(){return quality.load();}
-void SetPreset(unsigned value){preset=value==11?11:0;ready=false;++epoch;}
+void SetPreset(unsigned value){softRecovery=false;preset=value==11?11:0;ready=false;++epoch;}
 unsigned Preset(){return preset.load();}
 void ObserveDepth(ID3D11DeviceContext* ctx,unsigned long long serial,int eye,ID3D11Resource* resource){ DVR_PROFILE("DlssLive.ObserveDepth");
  if(!enabled||!serial||eye<0||eye>1||!resource)return;ComPtr<ID3D11Texture2D> texture;
@@ -145,7 +179,9 @@ void OnFinish(ID3D11DeviceContext* ctx,ID3D11CommandList* list){
 void OnPresent(ID3D11Device* device){ DVR_PROFILE("DlssLive.OnPresent");
  DlssStageTiming::Poll(device);
 #ifdef DVR_HAS_NGX
+ HoldTemporalInputs();
  auto& s=Get();
+ {ComPtr<ID3D11DeviceContext> immediate;device->GetImmediateContext(&immediate);ColorPool().Poll(immediate.Get(),device,enabled);}
  if(resetRecovery.exchange(false))recovery.Reset();
  if(enabled&&ready&&quality>0&&s.epoch==epoch){
   const auto nowPrepared=prepared.load(),nowEvaluated=evaluated.load();
@@ -154,7 +190,14 @@ void OnPresent(ID3D11Device* device){ DVR_PROFILE("DlssLive.OnPresent");
   s.seenPrepared=nowPrepared;s.seenEvaluated=nowEvaluated;
   if(s.incompletePresents>=2)FailStage("DLSS final pass missing for two rendered frames",true);
  }
- if(!enabled){{std::lock_guard lock(depthMutex);for(auto& depth:depths)depth=Depth{};for(auto& tone:tones)tone=Tone{};for(auto& packet:packets)packet.Reset();}if(s.context&&s.isolated){Restore restore(s);s.backend.Shutdown();}s.linearColor.Reset();s.linearColorUav.Reset();s.device.Reset();s.context.Reset();s.isolated.Reset();s.width=s.height=0;return;}
+ if(!enabled){{std::lock_guard lock(depthMutex);for(auto& depth:depths)depth=Depth{};for(auto& tone:tones)tone.clear();for(auto& packet:packets)packet.Reset();}if(s.context&&s.isolated){Restore restore(s);s.backend.Shutdown();}s.linearColor.Reset();s.linearColorUav.Reset();s.device.Reset();s.context.Reset();s.isolated.Reset();s.width=s.height=0;return;}
+ // A missing guide is a history discontinuity, not a device/backend failure.
+ // NGX Evaluate already resets history when the provenance epoch changes.
+ if(softRecovery.exchange(false)&&s.device.Get()==device&&s.context&&s.isolated){
+  {std::lock_guard lock(depthMutex);for(auto& d:depths)d=Depth{};for(auto& t:tones)t.clear();for(auto& p:packets)p.Reset();}
+  s.epoch=epoch;s.lastTime[0]=s.lastTime[1]=0;s.seenPrepared=prepared;s.seenEvaluated=evaluated;s.incompletePresents=0;
+  ready=true;Problem("DLSS temporal history reset; backend retained");return;
+ }
  if(ready&&s.device.Get()==device&&s.epoch==epoch)return;
  ready=false;
  if(s.context&&s.isolated){Restore restore(s);s.backend.Shutdown();}
@@ -166,7 +209,7 @@ void OnPresent(ID3D11Device* device){ DVR_PROFILE("DlssLive.OnPresent");
  Restore restore(s);
  if(!Shader(device,"Decode",s.decode)||!Shader(device,"Write",s.write)||!Shader(device,"Convert",s.convert)||!PresentShaders(s)){Problem("adapter shader creation failed");enabled=false;return;}
  if(!s.backend.Initialize(device,GameInfo::GameDir(),GameInfo::GameDir()+L"\\DVR_NGXCache")){Problem(s.backend.Problem());enabled=false;return;}
- ready=true;Problem(quality==0?"DLAA diagnostic ready; original TAA retained for fallback history":"DLSS SR diagnostic ready; awaiting matched final pass");
+ ++backendInitializations;ready=true;Problem(quality==0?"DLAA diagnostic ready; original TAA retained for fallback history":"DLSS SR diagnostic ready; awaiting matched final pass");
 #else
  if(enabled){Problem("candidate built without NGX");enabled=false;}
 #endif
@@ -189,7 +232,13 @@ IUnknown* Capture(ID3D11DeviceContext* ctx,unsigned long long serial,int eye,con
  // texture alive through that boundary. Motion still needs a snapshot for AFW.
  const bool direct=directColor.load()&&rgb.Get()!=target.Get();
  if(direct)b->color=rgb;
- if((!direct&&!clone(rd,b->color))||!clone(md,b->motion)){++fallback;return nullptr;}
+ if(!direct){
+  auto desc=rd;desc.Width=b->activeW;desc.Height=b->activeH;desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;desc.CPUAccessFlags=desc.MiscFlags=0;
+  b->colorLease=ColorPool().Acquire(device.Get(),desc,DXGI_FORMAT_UNKNOWN);
+  if(b->colorLease)b->color=b->colorLease->texture;
+  else if(!clone(rd,b->color)){++fallback;return nullptr;}
+ }
+ if(!clone(md,b->motion)){++fallback;return nullptr;}
  b->quality=quality;b->stamp={serial,epoch.load(),eye,rd.Width,rd.Height};b->jitter[0]=-jitter[0]*rd.Width;b->jitter[1]=jitter[1]*rd.Height;b->result=result;
  VRRuntime::PoseSet poses;if(ViewMatrixHook::ViewPoses(serial,poses))b->poseTime=poses.time;
  D3D11_BOX box{0,0,0,b->activeW,b->activeH,1};
@@ -204,6 +253,9 @@ void Finish(ID3D11DeviceContext* ctx,IUnknown* batch){if(!batch)return;
 }
 void ObserveTone(ID3D11DeviceContext* ctx,unsigned long long serial,int eye,ID3D11RenderTargetView* target,const D3D11_VIEWPORT& viewport){ DVR_PROFILE("DlssLive.ObserveTone");
  if(!enabled||quality==0||!serial||eye<0||eye>1||!target||viewport.TopLeftX!=0||viewport.TopLeftY!=0||viewport.Width<1||viewport.Height<1)return;
+ D3D11_RENDER_TARGET_VIEW_DESC desc{};target->GetDesc(&desc);
+ if(desc.ViewDimension!=D3D11_RTV_DIMENSION_TEXTURE2D||desc.Texture2D.MipSlice!=0||
+    (desc.Format!=DXGI_FORMAT_R8G8B8A8_UNORM&&desc.Format!=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB))return;
  auto data=DepthData(ctx);if(!data){data.Attach(new(std::nothrow) DepthList);if(!data||FAILED(ctx->SetPrivateDataInterface(depthKey,data.Get())))return;}
  Tone tone;tone.serial=serial;tone.epoch=epoch;tone.eye=eye;tone.width=UINT(viewport.Width);tone.height=UINT(viewport.Height);target->GetResource(&tone.color);data->tones.push_back(tone);
 }
@@ -219,7 +271,10 @@ IUnknown* CaptureUpscale(ID3D11DeviceContext* ctx,unsigned long long serial,int 
  if(!compactInputs)resolution=nullptr;
  if(!ActiveSize(resolution,td.Width,td.Height,b->activeW,b->activeH)){++fallback;Problem("invalid upscale active rectangle");return nullptr;}b->cropped=resolution!=nullptr;
  td.Width=b->activeW;td.Height=b->activeH;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;td.Usage=D3D11_USAGE_DEFAULT;td.CPUAccessFlags=td.MiscFlags=0;
- if(FAILED(device->CreateTexture2D(&td,nullptr,&b->color))||FAILED(device->CreateShaderResourceView(b->color.Get(),&sd,&b->colorSrv))){++fallback;return nullptr;}
+ // Only reuse the exact audited one-mip view; retain the original path otherwise.
+ if(sd.Texture2D.MostDetailedMip==0&&sd.Texture2D.MipLevels==1)b->colorLease=ColorPool().Acquire(device.Get(),td,sd.Format);
+ if(b->colorLease){b->color=b->colorLease->texture;b->colorSrv=b->colorLease->view;}
+ else if(FAILED(device->CreateTexture2D(&td,nullptr,&b->color))||FAILED(device->CreateShaderResourceView(b->color.Get(),&sd,&b->colorSrv))){++fallback;return nullptr;}
  b->final=true;b->quality=quality;b->stamp={serial,epoch.load(),eye,dd.Width,dd.Height};b->target=target;b->sourceIdentity=texture;
  D3D11_BOX box{0,0,0,b->activeW,b->activeH,1};ctx->CopySubresourceRegion(b->color.Get(),0,0,0,0,texture.Get(),0,&box);return b.Detach();
 #else
@@ -230,10 +285,22 @@ void AfterExecute(ID3D11DeviceContext* ctx,ID3D11CommandList* list){ DVR_PROFILE
 #ifdef DVR_HAS_NGX
  auto data=DepthData(list);if(data){std::lock_guard lock(depthMutex);
   for(auto entry:data->entries)if(entry.epoch==epoch){for(auto& prior:depths)if(prior.texture.Get()==entry.texture.Get()&&(prior.serial!=entry.serial||prior.eye!=entry.eye||prior.epoch!=entry.epoch))prior=Depth{};entry.submitted=true;depths[entry.serial%depths.size()]=entry;}
-  for(auto tone:data->tones)if(tone.epoch==epoch){for(auto& prior:tones)if(prior.color.Get()==tone.color.Get()&&prior.serial!=tone.serial)prior=Tone{};tones[tone.serial%tones.size()]=tone;}
+  for(auto tone:data->tones)if(tone.epoch==epoch){
+   // A reused render target cannot still describe an older view. Other targets
+   // in this same view must survive (combat/blur passes can write several).
+   for(auto& bucket:tones)bucket.erase(std::remove_if(bucket.begin(),bucket.end(),[&](const Tone& prior){return prior.color.Get()==tone.color.Get()&&(prior.serial!=tone.serial||prior.eye!=tone.eye);}),bucket.end());
+   auto& bucket=tones[tone.serial%tones.size()];
+   if(!bucket.empty()&&bucket.front().serial!=tone.serial)bucket.clear();
+   auto it=std::find_if(bucket.begin(),bucket.end(),[&](const Tone& prior){return prior.color.Get()==tone.color.Get();});
+   if(it!=bucket.end())*it=tone;
+   else{if(bucket.size()>=8)bucket.erase(bucket.begin());bucket.push_back(tone);}
+  }
  }
  if(!enabled||!ready)return;IUnknown* raw=nullptr;UINT bytes=sizeof(raw);
  if(FAILED(list->GetPrivateData(batchKey,&bytes,&raw))||!raw)return;ComPtr<Batch> b;b.Attach(static_cast<Batch*>(raw));auto& s=Get();
+ // Runs after all uses in this boundary, including failure exits. The batch's
+ // lease also prevents reuse while its command list could still be replayed.
+ struct Completion {ID3D11DeviceContext* ctx;Batch* batch;~Completion(){DlssColorPool::Submitted(ctx,batch->colorLease);}} completion{ctx,b.Get()};
  if(b->stamp.epoch!=epoch||b->quality!=quality||!s.device){++fallback;return;}
  ComPtr<ID3D11Device> owner;ctx->GetDevice(&owner);if(owner.Get()!=s.device.Get()){++fallback;return;}
  // An unsuccessful SR stage must stop feeding unfiltered colour to later frames.
@@ -273,10 +340,18 @@ void AfterExecute(ID3D11DeviceContext* ctx,ID3D11CommandList* list){ DVR_PROFILE
 #endif
   auto* output=s.backend.Output(b->stamp.eye);auto* destination=b->result.Get();
   ctx->CSSetShaderResources(0,1,&output);ctx->CSSetUnorderedAccessViews(1,1,&destination,nullptr);ctx->CSSetShader(s.write.Get(),nullptr,0);ctx->Dispatch((s.width+7)/8,(s.height+7)/8,1);
-  ctx->CSSetShaderResources(0,1,&noSrv);ctx->CSSetUnorderedAccessViews(0,2,noUav,nullptr);s.lastTime[b->stamp.eye]=b->poseTime;++evaluated;++eyeEvaluated[b->stamp.eye];return;
+  ctx->CSSetShaderResources(0,1,&noSrv);ctx->CSSetUnorderedAccessViews(0,2,noUav,nullptr);transientFailure=false;s.lastTime[b->stamp.eye]=b->poseTime;++evaluated;++eyeEvaluated[b->stamp.eye];return;
  }
- auto packet=packets[b->stamp.serial%packets.size()];Tone tone;{std::lock_guard lock(depthMutex);tone=tones[b->stamp.serial%tones.size()];}
- if(!packet||!TemporalFrame::SameImage(packet->stamp,b->stamp)||tone.serial!=b->stamp.serial||tone.epoch!=b->stamp.epoch||tone.eye!=b->stamp.eye||tone.color.Get()!=b->sourceIdentity.Get()||!tone.width||!tone.height||tone.width>b->stamp.width||tone.height>b->stamp.height){++fallback;failureGuard.transient=true;Problem("SR missing matching temporal inputs or tone viewport");return;}
+ auto packet=packets[b->stamp.serial%packets.size()];Tone tone;{std::lock_guard lock(depthMutex);
+  for(const auto& candidate:tones[b->stamp.serial%tones.size()])if(candidate.serial==b->stamp.serial&&candidate.epoch==b->stamp.epoch&&candidate.eye==b->stamp.eye&&candidate.color.Get()==b->sourceIdentity.Get()){tone=candidate;break;}
+ }
+ if(!packet||!TemporalFrame::SameImage(packet->stamp,b->stamp)||tone.serial!=b->stamp.serial||tone.epoch!=b->stamp.epoch||tone.eye!=b->stamp.eye||tone.color.Get()!=b->sourceIdentity.Get()||!tone.width||!tone.height||tone.width>b->stamp.width||tone.height>b->stamp.height){
+  ++fallback;failureGuard.transient=true;
+  std::ostringstream detail;detail<<"SR missing matching temporal inputs or tone viewport: final "<<b->stamp.serial<<"/"<<b->stamp.epoch<<"/"<<b->stamp.eye
+   <<" packet "<<(packet?packet->stamp.serial:0)<<"/"<<(packet?packet->stamp.epoch:0)<<"/"<<(packet?packet->stamp.eye:-1)
+   <<" tone "<<tone.serial<<"/"<<tone.epoch<<"/"<<tone.eye<<" sourceMatch "<<(tone.color.Get()==b->sourceIdentity.Get())<<" viewport "<<tone.width<<"x"<<tone.height;
+  Problem(detail.str());return;
+ }
  if((b->cropped&&(b->activeW!=tone.width||b->activeH!=tone.height))||(packet->cropped&&(packet->activeW!=tone.width||packet->activeH!=tone.height))){++fallback;Problem("scene/temporal/upscale active rectangles disagree");return;}
  if(!Configure(s,ctx,tone.width,tone.height,b->stamp.width,b->stamp.height,b->quality)){++fallback;return;}
  // Immediate-context command order protects this workspace across eyes/frames.
@@ -294,8 +369,12 @@ void AfterExecute(ID3D11DeviceContext* ctx,ID3D11CommandList* list){ DVR_PROFILE
 #ifdef DVR_HAS_PDAFW
  AfwLive::Prepared(b->stamp.serial,b->stamp.eye,b->stamp.epoch,packet->linearDepth.Get(),packet->motion.Get(),tone.width,tone.height);
 #endif
- failureGuard.armed=false;recovery.Success();s.lastTime[b->stamp.eye]=packet->poseTime;++evaluated;++eyeEvaluated[b->stamp.eye];Problem("DLSS SR diagnostic evaluating; native TAA cost retained");packets[b->stamp.serial%packets.size()].Reset();
+ failureGuard.armed=false;transientFailure=false;recovery.Success();s.lastTime[b->stamp.eye]=packet->poseTime;++evaluated;++eyeEvaluated[b->stamp.eye];Problem("DLSS SR diagnostic evaluating; native TAA cost retained");packets[b->stamp.serial%packets.size()].Reset();
 #endif
 }
-std::string Status(){std::lock_guard lock(statusMutex);std::ostringstream s;s<<"dlsslive enabled "<<enabled<<" compact "<<compactInputs<<" fullscreenonly "<<fullscreenScan<<" directcolor "<<directColor<<" directframes "<<directColorFrames<<" ready "<<ready<<" quality "<<quality<<" requestedpreset "<<preset<<" viewport "<<activeWidth<<"x"<<activeHeight<<" output "<<outputWidth<<"x"<<outputHeight<<" eyes "<<eyeEvaluated[0]<<"/"<<eyeEvaluated[1]<<" prepared "<<prepared<<" captured "<<captured<<" evaluated "<<evaluated<<" recoveries "<<recoveryCount<<" fallback "<<fallback<<" missingdepth "<<missingDepth<<" depthobserved "<<depthObserved<<" lastdepth "<<lastDepthSerial<<" lastcapture "<<lastCaptureSerial<<" reason "<<problem;return s.str();}
+std::string Status(){std::lock_guard lock(statusMutex);std::ostringstream s;
+#ifdef DVR_HAS_NGX
+s<<"colorpool hits "<<ColorPool().hits<<" misses "<<ColorPool().misses<<" | ";
+#endif
+s<<"dlsslive enabled "<<enabled<<" compact "<<compactInputs<<" fullscreenonly "<<fullscreenScan<<" directcolor "<<directColor<<" directframes "<<directColorFrames<<" ready "<<ready<<" quality "<<quality<<" requestedpreset "<<preset<<" viewport "<<activeWidth<<"x"<<activeHeight<<" output "<<outputWidth<<"x"<<outputHeight<<" eyes "<<eyeEvaluated[0]<<"/"<<eyeEvaluated[1]<<" prepared "<<prepared<<" captured "<<captured<<" evaluated "<<evaluated<<" aarepairs "<<aaRepairs<<" backendinits "<<backendInitializations<<" recoveries "<<recoveryCount<<" fallback "<<fallback<<" missingdepth "<<missingDepth<<" depthobserved "<<depthObserved<<" lastdepth "<<lastDepthSerial<<" lastcapture "<<lastCaptureSerial<<" reason "<<problem;return s.str();}
 }

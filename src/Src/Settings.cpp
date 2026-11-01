@@ -1,11 +1,60 @@
 #include "pch.h"
 #include "Settings.h"
 #include "GameInfo.h"
+#include "CVars.h"
+#include "VRRuntime.h"
+#include <detours/detours.h>
 #include <map>
 #include <algorithm>
 
 namespace
 {
+    using BlurStartFn=void(*)(void*);
+    BlurStartFn g_BlurStart=nullptr;
+    std::atomic<bool> g_BlockEffectBlur{false};
+    std::atomic<unsigned long long> g_BlurSuppressed{0};
+    bool g_BlurHookInstalled=false;
+    void BlurStart(void* self){
+        // The exact motion-blur FX class creates an optional effect token at +20.
+        // Leave active tokens and their normal stop/destructor cleanup untouched.
+        if(g_BlockEffectBlur.load(std::memory_order_relaxed)&&self&&
+           *static_cast<uintptr_t*>(self)==GameInfo::Base()+0x1c3b558&&
+           *reinterpret_cast<int*>(static_cast<char*>(self)+0x20)==-1){
+            ++g_BlurSuppressed;return;
+        }
+        g_BlurStart(self);
+    }
+
+    BlurStartFn g_CombatStart=nullptr, g_HitStart=nullptr;
+    bool g_CombatHook=false, g_HitHook=false;
+    std::atomic<unsigned long long> g_CombatSuppressed{0}, g_HitSuppressed{0};
+    bool SuppressVisual(void* self, uintptr_t table) {
+        return g_BlockEffectBlur.load(std::memory_order_relaxed) && self &&
+            *static_cast<uintptr_t*>(self)==GameInfo::Base()+table &&
+            *reinterpret_cast<int*>(static_cast<char*>(self)+0x20)==-1;
+    }
+    void CombatStart(void* self) {
+        if(SuppressVisual(self,0x1c76998)){++g_CombatSuppressed;return;}
+        g_CombatStart(self);
+    }
+    void HitStart(void* self) {
+        if(SuppressVisual(self,0x1c76858)){++g_HitSuppressed;return;}
+        g_HitStart(self);
+    }
+    // These start methods only register an optional screen-effect token. Their
+    // gameplay predicates, timer updates and token cleanup remain original.
+    bool InstallVisualHook(uintptr_t rva,uintptr_t table,BlurStartFn& original,BlurStartFn hook) {
+        const auto base=GameInfo::Base();
+        const unsigned char expected[]={0x40,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0x41,0x18,0x48,0x8b,0xd9};
+        if(memcmp(reinterpret_cast<void*>(base+rva),expected,sizeof(expected)) ||
+           *reinterpret_cast<uintptr_t*>(base+table+5*8)!=base+rva)return false;
+        original=reinterpret_cast<BlurStartFn>(base+rva);
+        if(DetourTransactionBegin()!=NO_ERROR)return false;
+        if(DetourUpdateThread(GetCurrentThread())!=NO_ERROR ||
+           DetourAttach(reinterpret_cast<PVOID*>(&original),hook)!=NO_ERROR){DetourTransactionAbort();return false;}
+        return DetourTransactionCommit()==NO_ERROR;
+    }
+
     enum class Kind { Bool, Float, Choice };
     struct Key
     {
@@ -250,4 +299,46 @@ bool Settings::SaveRenderer(int mode)
     if (!WritePrivateProfileStringW(L"Display", L"Renderer", value.c_str(), path.c_str())) return false;
     g_RendererOverride = mode;
     return true;
+}
+
+// Engine options and player effects can overwrite live render controls after
+// startup. Reassert the selected comfort options at the existing 10 Hz poll.
+void Settings::ApplyComfort()
+{
+    const bool running=VRRuntime::GetStatus().running;
+    g_BlockEffectBlur=running&&B("display.disablemotionblur");
+    if(!running)return;
+    auto hold=[](const char* name,int value){if(CVars::Address(name)&&CVars::GetInt(name)!=value)CVars::SetInt(name,value);};
+    if(B("display.disablemotionblur")){
+        hold("r_skipCameraMotionBlur",1);
+        hold("view_damageBlur",0);
+        hold("view_doubleVision",0);
+    }
+    if(B("display.disabledepthoffield"))hold("r_skipDOF",1);
+}
+
+void Settings::InstallComfortHooks()
+{
+    if(!GameInfo::IsSupportedBuild())return;
+    g_CombatHook=InstallVisualHook(0x81f8f0,0x1c76998,g_CombatStart,CombatStart);
+    g_HitHook=InstallVisualHook(0x81f280,0x1c76858,g_HitStart,HitStart);
+    LOGI("Comfort: combat-focus visual hook {}, heavy-hit visual hook {}",g_CombatHook,g_HitHook);
+    const auto base=GameInfo::Base();
+    // Verified RTTI arkPlayerFXMotionBlur, vtable slot 5, constructor token=-1.
+    const unsigned char expected[]={0x40,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0x41,0x18,0x48,0x8b,0xd9};
+    if(memcmp(reinterpret_cast<void*>(base+0x6846b0),expected,sizeof(expected))||
+       *reinterpret_cast<uintptr_t*>(base+0x1c3b558+5*8)!=base+0x6846b0){
+        LOGI("Comfort: motion-blur FX hook signature mismatch; not installed");return;
+    }
+    g_BlurStart=reinterpret_cast<BlurStartFn>(base+0x6846b0);
+    DetourTransactionBegin();DetourUpdateThread(GetCurrentThread());
+    DetourAttach(reinterpret_cast<PVOID*>(&g_BlurStart),BlurStart);
+    const LONG result=DetourTransactionCommit();g_BlurHookInstalled=result==NO_ERROR;
+    LOGI("Comfort: dedicated player motion-blur FX hook installed {} (detour {})",g_BlurHookInstalled,result);
+}
+std::string Settings::ComfortStatus()
+{
+    return fmt::format("comfort combatHook {} hitHook {} combatSuppressed {} hitSuppressed {} blurhook {} blockfx {} suppressed {} cameraSkip {} dofSkip {} damageBlur {} doubleVision {}",
+        g_CombatHook,g_HitHook,g_CombatSuppressed.load(),g_HitSuppressed.load(),g_BlurHookInstalled,g_BlockEffectBlur.load(),g_BlurSuppressed.load(),CVars::GetInt("r_skipCameraMotionBlur",-1),
+        CVars::GetInt("r_skipDOF",-1),CVars::GetInt("view_damageBlur",-1),CVars::GetInt("view_doubleVision",-1));
 }

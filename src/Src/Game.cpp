@@ -4,6 +4,7 @@
 
 namespace
 {
+    std::atomic<bool> g_FastSingleton{ true };
     bool Readable(const void* p, size_t n)
     {
         MEMORY_BASIC_INFORMATION mbi{};
@@ -17,7 +18,12 @@ void* Game::GameLocal()
 {
     if (!GameInfo::IsSupportedBuild()) return nullptr;
     void** pp = (void**)(GameInfo::Base() + kGameLocalPtr);
-    return Readable(pp, 8) ? *pp : nullptr;
+    if (!g_FastSingleton.load(std::memory_order_relaxed)) return Readable(pp, 8) ? *pp : nullptr;
+    // The supported executable owns this fixed slot for its lifetime. Read its
+    // current value every time (never cache the player across level changes).
+    // SEH protects the read without a kernel memory query on every hook call.
+    __try { return *pp; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
 }
 
 void* Game::LocalPlayer()
@@ -49,3 +55,5 @@ bool Game::PlayerView(float origin[3], float axis[9])
     memcpy(axis, p + kPlayerViewAxis, 36);
     return true;
 }
+
+void Game::SetFastSingleton(bool enabled) { g_FastSingleton.store(enabled, std::memory_order_relaxed); LOGI("CPU singleton guarded read {}", enabled); }

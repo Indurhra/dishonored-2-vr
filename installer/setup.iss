@@ -5,7 +5,11 @@
   #error Version is required
 #endif
 [Setup]
+#ifdef InstallerTest
+AppId={{0AF9E93C-B366-4D82-AB68-5C982F383781}
+#else
 AppId={{E714BF50-8F04-4EC5-94DC-2C49736C46A7}
+#endif
 AppName=Dishonored 2 VR (Indurhra)
 AppVersion={#Version}
 AppPublisher=Indurhra
@@ -37,6 +41,7 @@ Source: "{#Stage}\DishonoredVR-Manager.exe"; Flags: dontcopy
 
 [Tasks]
 Name: "autoupdate"; Description: "Automatically install stable mod updates when using the Play Dishonored 2 VR shortcut"; Flags: checkedonce
+Name: "afw"; Description: "Start new installations with AFW + DLSS Quality (NVIDIA RTX required; existing settings are preserved)"; Flags: checkedonce
 Name: "desktopicon"; Description: "Create a Play Dishonored 2 VR desktop shortcut"; Flags: unchecked
 
 [Icons]
@@ -77,7 +82,7 @@ begin
   LibraryPage := CreateInputOptionPage(wpLicense, 'Choose your game', 'Multiple Steam installations were found.', 'Select the installation to use.', True, False);
   for I:=0 to GetArrayLength(Libraries)-1 do LibraryPage.Add(Libraries[I]);
   if GetArrayLength(Libraries)>0 then LibraryPage.SelectedValueIndex:=0;
-  GamePage := CreateInputDirPage(LibraryPage.ID, 'Dishonored 2 location', 'Your Steam game folder', 'The installer checks the supported game build. Existing settings and saves are preserved.', False, '');
+  GamePage := CreateInputDirPage(LibraryPage.ID, 'Dishonored 2 location', 'Your Steam game folder', 'The installer verifies the mod, AFW, DLSS, controller helper and wheel assets. Existing settings and saves are preserved.', False, '');
   GamePage.Add('Game folder:');
   Initial := ExpandConstant('{param:GAMEDIR|}');
   if Initial='' then Initial:=GetPreviousData('GameDir','');
@@ -118,12 +123,13 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
-var Code: Integer; Headset, Auto: String;
+var Code: Integer; Headset, Auto, Afw: String;
 begin
   if CurStep=ssPostInstall then begin
     Headset:='auto';if HeadsetPage.SelectedValueIndex=0 then Headset:='psvr2';if HeadsetPage.SelectedValueIndex=1 then Headset:='other';
     Auto:='0';if WizardIsTaskSelected('autoupdate') then Auto:='1';
-    if not Exec(ExpandConstant('{app}\DishonoredVR-Manager.exe'),'--install '+Q(GamePage.Values[0])+' '+Headset+' '+Auto,'',SW_HIDE,ewWaitUntilTerminated,Code) or (Code<>0) then
+    Afw:='0';if WizardIsTaskSelected('afw') then Afw:='1';
+    if not Exec(ExpandConstant('{app}\DishonoredVR-Manager.exe'),'--install '+Q(GamePage.Values[0])+' '+Headset+' '+Auto+' '+Afw,'',SW_HIDE,ewWaitUntilTerminated,Code) or (Code<>0) then
       RaiseException('The mod could not be installed. Its transaction was rolled back. Reopen setup after resolving the reported problem.');
   end;
 end;

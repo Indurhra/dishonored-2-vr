@@ -8,6 +8,8 @@ void SetCompactInputs(bool); // diagnostic A/B; active scene inputs by default
 void SetFullscreenScan(bool); // diagnostic A/B; verified fullscreen draws only by default
 bool FullscreenScan();
 bool Enabled();
+bool TransientFailure(); // latest failure was missing temporal inputs, not an invalid image/backend error
+unsigned BackendInitializations(); // diagnostics and regression coverage
 unsigned long long Generation();
 void SetQuality(int); // 0 DLAA; 1 Quality; 2 Balanced; 3 Performance; 4 Ultra Performance
 int Quality();

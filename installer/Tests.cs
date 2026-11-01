@@ -7,13 +7,19 @@ using DvrInstaller;
 class Tests {
  static int count;static void Check(bool b,string text){if(!b)throw new Exception(text);Console.WriteLine("PASS "+text);count++;}
  static void Fails(Action a,string text){bool failed=false;try{a();}catch{failed=true;}Check(failed,text);}
- static string Make(string work,string version,string marker){string folder=Path.Combine(work,"payload-"+marker);Directory.CreateDirectory(folder);var entries=new List<Entry>();foreach(var rel in Package.Allowed){string p=Path.Combine(folder,rel.Replace('/','\\'));Directory.CreateDirectory(Path.GetDirectoryName(p));File.WriteAllText(p,rel=="DishonoredVR.ini"?"[Gameplay]\r\nCustomSetting=keep\r\n":marker+rel);entries.Add(new Entry{Path=rel,Sha256=Data.HashFile(p)});}Data.Save(Path.Combine(folder,"manifest.json"),new Manifest{Schema=1,Version=version,Files=entries.ToArray()});string zip=folder+".zip";ZipFile.CreateFromDirectory(folder,zip);return zip;}
+ static string Make(string work,string version,string marker){string folder=Path.Combine(work,"payload-"+marker);Directory.CreateDirectory(folder);var entries=new List<Entry>();foreach(var rel in Package.Allowed){string p=Path.Combine(folder,rel.Replace('/','\\'));Directory.CreateDirectory(Path.GetDirectoryName(p));File.WriteAllText(p,rel=="DishonoredVR.ini"?"[Gameplay]\r\nCustomSetting=keep\r\n":marker+rel);entries.Add(new Entry{Path=rel,Sha256=Data.HashFile(p)});}Data.Save(Path.Combine(folder,"manifest.json"),new Manifest{Schema=2,Version=version,Files=entries.ToArray()});string zip=folder+".zip";ZipFile.CreateFromDirectory(folder,zip);return zip;}
  static void Main(string[] args){if(args.Length>0&&args[0]=="--sleep"){System.Threading.Thread.Sleep(30000);return;}string work=args[0];Directory.CreateDirectory(work);string game=Path.Combine(work,"fake-game");Directory.CreateDirectory(game);Func<string,bool> valid=p=>p==game;
   File.WriteAllText(Path.Combine(game,"dinput8.dll"),"previous mod");File.WriteAllText(Path.Combine(game,"DishonoredVR.ini"),"user settings untouched");File.WriteAllText(Path.Combine(game,"save.sav"),"save untouched");
   string p1=Make(work,"0.5.1","one"),p2=Make(work,"0.5.2","two");var engine=new Engine(game,valid,null);
   using(var a=new Package(p1))engine.Install(a,"psvr2");
   Check(engine.ReadState().Version=="0.5.1","fresh install version");Check(File.ReadAllText(Path.Combine(game,"DishonoredVR.ini"))=="user settings untouched","existing settings preserved byte-for-byte");
   Check(File.Exists(Path.Combine(game,"DVR_psvr2","dvr_psvr2_bridge.exe")),"PSVR2 helper included");
+  engine.Verify();Check(true,"fresh install read-back verified");
+  File.Delete(Path.Combine(game,"DishonoredVR.dll"));Fails(()=>engine.Verify(),"missing DLL blocks verification");engine.Repair();engine.Verify();Check(true,"offline repair restores missing DLL");
+  File.WriteAllText(Path.Combine(game,"DishonoredVR.dll"),"damaged");Fails(()=>engine.Verify(),"damaged DLL blocks verification");engine.Repair();Check(File.ReadAllText(Path.Combine(game,"DishonoredVR.dll"))=="oneDishonoredVR.dll","repair backs up and restores changed DLL");
+  File.WriteAllText(Path.Combine(game,"DVR_usemock.txt"),"test");Fails(()=>engine.Verify(true),"simulator override blocks launch");File.Delete(Path.Combine(game,"DVR_usemock.txt"));
+  File.WriteAllText(Path.Combine(game,"DVR_cmd_test.txt"),"test");Fails(()=>engine.Verify(true),"pending developer command blocks launch");File.Delete(Path.Combine(game,"DVR_cmd_test.txt"));
+  Check(Dependencies.Problems(game).Count==2,"untested renderer dependency hashes detected");
   using(var b=new Package(p2))engine.Install(b);
   Check(engine.ReadState().Version=="0.5.2","update version");Check(File.ReadAllText(Path.Combine(game,"DishonoredVR.ini"))=="user settings untouched","update preserves settings");
   engine.Rollback();Check(engine.ReadState().Version=="0.5.1","rollback restores previous version");
@@ -40,6 +46,7 @@ class Tests {
   Fails(()=>Updates.ApplyRelease(engine,release,(a,p)=>{throw new IOException("offline");}),"offline update fails without changes");Check(engine.ReadState().Version=="0.5.1","offline failure preserves installed version");
   Check(Updates.ApplyRelease(engine,release,(a,p)=>File.Copy(p2,p)),"automatic update pipeline applies verified new package");
   Check(engine.ReadState().Version=="0.5.2"&&File.ReadAllText(Path.Combine(game,"DishonoredVR.ini")).Contains("Psvr2Triggers = 0"),"automatic update preserves settings and advances version");
+  Check(Dependencies.Problems(game,engine.ReadState()).Count==0,"verified release manifest accepts updated dependency pair");
   string sleeper=Path.Combine(work,"Dishonored2.exe");File.Copy(System.Reflection.Assembly.GetExecutingAssembly().Location,sleeper);
   using(var process=System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(sleeper,"--sleep"){UseShellExecute=false,CreateNoWindow=true})) {
    try {System.Threading.Thread.Sleep(100);Fails(()=>engine.Uninstall(),"running game blocks uninstall");using(var b=new Package(p2))Fails(()=>engine.Install(b),"running game blocks update");}

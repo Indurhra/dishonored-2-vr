@@ -326,6 +326,7 @@ namespace GpuTrace
     //! Size of the vertex-shader bytecode cache. A level load creates a whole new set of shaders and the old set's
     //! bytecode is never handed back, so this is where that growth shows up.
     std::string ShaderCache();
+    void SetCpuFast(unsigned mask); // diagnostic A/B mask; no persistent user setting
     size_t ShaderCount();      //!< vertex shaders whose bytecode was captured at creation (hundreds in play)
     uint64_t VsHashOf(const void* vs);   //!< the DXBC header hash of a live vertex shader (0 = unknown)
     uint64_t ShaderHashOf(const void* sh);   //!< the same for a vertex, pixel or compute shader

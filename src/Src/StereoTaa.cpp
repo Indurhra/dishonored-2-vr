@@ -800,6 +800,8 @@ namespace
     std::atomic<unsigned long long> g_PrViaA[2], g_PrViaB[2], g_PrViaU[2];
     // objmotion: how far a draw's previous position is from the static world's rule (prevVP * model), per eye -- an
     // object's own motion as the TAA sees it. The bug shows as the right eye's ~0 where the left's is not.
+    // Diagnostic-only motion measurements must not tax normal rendering.
+    std::atomic<bool> g_ObjectMotionStats{ false };
     std::atomic<unsigned long long> g_OmN[2], g_OmMov[2], g_OmSum[2], g_OmBin[2][5];   // sum in 1/1000 px
     const float kOmEdge[4] = { 0.1f, 0.5f, 2.f, 8.f };
 
@@ -918,7 +920,7 @@ std::string StereoTaa::PrevRuleStatus()
     for (int e = 0; e < 2; e++)
         s += fmt::format(" | {} hit {} approx {} own {} xy {} miss {} first {} via A {} B {} U {}", e ? "R" : "L", g_PrHit[e].load(), g_PrApprox[e].load(), g_PrOwn[e].load(), g_PrXy[e].load(), g_PrMiss[e].load(), g_PrSame[e].load(),
                          g_PrViaA[e].load(), g_PrViaB[e].load(), g_PrViaU[e].load());
-    s += " | objmotion";
+    s += fmt::format(" | objmotion enabled {}", g_ObjectMotionStats.load(std::memory_order_relaxed) ? 1 : 0);
     for (int e = 0; e < 2; e++)
     {
         const unsigned long long n = g_OmN[e].load();
@@ -976,7 +978,7 @@ bool StereoTaa::FixPrevRows(ID3D11DeviceContext* c, ID3D11Buffer* viewCb, const 
         float C[16];   // none: C, as before (the cached previous of the other eye's last frame)
         if (PrevCorrection(c, viewCb, C, prev, cur)) { float in[16]; memcpy(in, prev, 64); Mul4(C, in, prev); changed = true; }
     }
-    if (cur) NoteObjMotion(c, d, cur, prev);
+    if (cur && g_ObjectMotionStats.load(std::memory_order_relaxed)) NoteObjMotion(c, d, cur, prev);
     return changed;
 }
 
@@ -1019,14 +1021,16 @@ void StereoTaa::OnDraw(ID3D11DeviceContext* c, int kind, int type, unsigned coun
     // lookup and its shared lock on thousands of unrelated scene draws.
     if(kind==1&&(!DlssLive::FullscreenScan()||(type==1&&count==3))&&DlssLive::Enabled()&&DlssLive::Quality()>0&&VRRuntime::Stereo()&&!ScreenMode::FlatRender()){
         ID3D11PixelShader* shader=nullptr;c->PSGetShader(&shader,nullptr,nullptr);const auto hash=GpuTrace::ShaderHashOf(shader);if(shader)shader->Release();
-        // These two shaders and their bindings were captured and disassembled in D2.
-        if(hash==0x7f17d0b9bf1fea47ull||hash==0xec1204b254163299ull){
+        // Post-effect permutations can replace the normal tonemap shader. Track
+        // eligible fullscreen colour writes by frame AND target resource instead.
+        // Only the audited upscale shader can trigger a DLSS evaluation.
+        if(hash){
             ID3D11Buffer* cb=nullptr;c->PSGetConstantBuffers(1,1,&cb);float matrix[16]{},resolution[2]{};bool hasResolution=false;unsigned long long serial=0;
             if(cb){if(ViewMatrixOf(c,cb,matrix))serial=ViewMatrixHook::SerialOfViewMatrix(matrix);hasResolution=DlssResolution(c,cb,resolution);cb->Release();}
             if(serial){const auto pose=ViewMatrixHook::RenderPoseXr(serial);
                 if(pose.valid&&!pose.flat&&pose.serial==serial&&pose.eye>=0&&pose.eye<2){
                     ID3D11RenderTargetView* target=nullptr;c->OMGetRenderTargets(1,&target,nullptr);
-                    if(hash==0x7f17d0b9bf1fea47ull){D3D11_VIEWPORT vp{};UINT n=1;c->RSGetViewports(&n,&vp);if(n)DlssLive::ObserveTone(c,serial,pose.eye,target,vp);}
+                    if(hash!=0xec1204b254163299ull){D3D11_VIEWPORT vp{};UINT n=1;c->RSGetViewports(&n,&vp);if(n)DlssLive::ObserveTone(c,serial,pose.eye,target,vp);}
                     else{ID3D11ShaderResourceView* color=nullptr;c->PSGetShaderResources(0,1,&color);if(hasResolution)p.dlssBatch=DlssLive::CaptureUpscale(c,serial,pose.eye,color,target,resolution);if(color)color->Release();}
                     if(target)target->Release();
                 }
@@ -1414,11 +1418,11 @@ bool StereoTaa::Command(const std::string& what, std::istringstream& ss)
 #endif
     if(what=="dlsssr"){
         int q=0;ss>>q;if(q<0||q>4){LOGI("dlsssr: 0 off, 1 Quality, 2 Balanced, 3 Performance, 4 Ultra Performance");return true;}
-        DlssLive::SetQuality(q);DlssLive::SetEnabled(q!=0);
+        VRRuntime::NoteStereoCommand();DlssLive::SetQuality(q);DlssLive::SetEnabled(q!=0);
         const float scales[]={0.f,2.f/3.f,0.58f,0.5f,1.f/3.f};RenderRes::SetTemporalScale(scales[q]);
         LOGI("DLSS SR diagnostic requested quality {} (actual viewport is verified at tonemap)",q);return true;
     }
-    if (what == "dlsslive") {int on=0;ss>>on;if(on&&CVars::GetInt("rs_enable",0)!=0){LOGI("dlsslive refused: DLAA diagnostic requires full-resolution rendering; restore dynamicresprobe 0 first");return true;}DlssLive::SetQuality(0);DlssLive::SetEnabled(on!=0);if(!on)RenderRes::SetTemporalScale(0);LOGI("{}",DlssLive::Status());return true;}
+    if (what == "dlsslive") {int on=0;ss>>on;if(on&&CVars::GetInt("rs_enable",0)!=0){LOGI("dlsslive refused: DLAA diagnostic requires full-resolution rendering; restore dynamicresprobe 0 first");return true;}VRRuntime::NoteStereoCommand();DlssLive::SetQuality(0);DlssLive::SetEnabled(on!=0);if(!on)RenderRes::SetTemporalScale(0);LOGI("{}",DlssLive::Status());return true;}
     if(what=="dlsscompact"){int on=1;ss>>on;DlssLive::SetCompactInputs(on!=0);return true;}
     if(what=="dlssfullscreenscan"){int on=1;ss>>on;DlssLive::SetFullscreenScan(on!=0);return true;}
     if (what == "dlssstatus") {const auto status=DlssLive::Status();LOGI("{} | {}",status,TemporalBoundary::Status());std::ofstream f(GameInfo::GameDir()+L"\\DVR_dlssstatus.txt");f<<status;return true;}
@@ -1457,6 +1461,7 @@ bool StereoTaa::Command(const std::string& what, std::istringstream& ss)
         LOGI("cmd vr aadump {}", tag);
         return true;
     }
+    if (what == "motionstats") { int m = 0; ss >> m; g_ObjectMotionStats.store(m != 0, std::memory_order_relaxed); LOGI("cmd vr motionstats {}", m != 0); return true; }
     if (what == "aaprevreset") { ResetPrevStats(); LOGI("cmd vr aaprevreset"); return true; }
     if (what == "aamonowin") { int m = 1; ss >> m; g_MonoNotBad = m != 0; LOGI("cmd vr aamonowin {} (a mono view's TAA in stereo: {})", m, m ? "not a failure of the safety net" : "counted as no eye, as before"); return true; }
     if (what == "aabreak") { int m = 1; ss >> m; g_Break = m != 0; LOGI("cmd vr aabreak {}", m); return true; }

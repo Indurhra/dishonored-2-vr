@@ -1,0 +1,9 @@
+PureDark Alternate Frame Warping runtime
+
+Component: PDAFWPlugin.dll
+Author: PureDark — https://github.com/PureDark
+Bundled runtime SHA256: 48d5849f64ab1b9ab2717247562afc203cd92900c901510983c745618cc9e5d5
+
+This is the exact third-party runtime supplied by this fork's maintainer and tested with this release. It is a separate binary component, not original work by Indurhra or The Cosmic Tangerine. The mod's GPL license does not relicense this runtime or grant rights to its proprietary implementation. No AFW source or SDK header is included in this installer.
+
+The release pins this compatible version. Mod updates may carry a new runtime only after compatibility validation; the launcher does not blindly replace it with an arbitrary upstream DLL.

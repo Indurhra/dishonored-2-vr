@@ -9,6 +9,8 @@ namespace KbmInject
 {
     void Tick();                 //!< call once per rendered frame (render thread)
     void SetEnabled(bool on);
+    // Test harness only: menuinput explicitly selects the observed play/menu state; no OS input.
+    void SetSimulatorMode(bool on);
     bool Enabled();
     void SetSnapAngle(float deg);          //!< 0 = smooth turning
     void SetMouseCountsPerDegree(float c); //!< calibration for snap turns (default from g_mouseSensitivity 0.808)

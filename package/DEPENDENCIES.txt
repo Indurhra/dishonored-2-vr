@@ -1,0 +1,19 @@
+Dishonored 2 VR 0.7.0 — complete offline installation
+
+The installer includes the mod/proxy, the tested AFW and DLSS runtime pair, PSVR2 helper/loader, and the 43 wheel artwork files used by the renderer. A fresh default installation selects AFW + DLSS Quality. Untick that setup option for Native Stereo, including on a GPU without supported NVIDIA DLSS. Existing INI files are preserved exactly; an existing renderer selection is not overridden.
+
+DLSS requires compatible NVIDIA RTX hardware and drivers. File verification confirms installation integrity, not headset connectivity, GPU support, image quality or a guaranteed frame rate.
+
+NVIDIA DLSS: NVIDIA Corporation. Official source: https://github.com/NVIDIA/DLSS/tree/a291cc7d2cc642a51566f3dfd5376f635cd1b284
+nvngx_dlss.dll SHA256: be6e434a94ca32499515eb62ca0e6c274526055d568d0426e4c652dcdfb6ee6e
+NVIDIA's separate terms are included in NVIDIA-LICENSE.txt and displayed during setup.
+
+PureDark AFW: see AFW-NOTICE.txt. Neither third-party runtime is relicensed by the mod's GPL license.
+
+Wheel artwork originates from Dishonored 2 (Arkane Studios / Bethesda / ZeniMax). It is not original artwork by this fork and is not relicensed as GPL source. This package requires the supported Steam game and does not include the game executable, levels or player saves.
+
+PSVR2 Toolkit loader: BnuuySolutions/PSVR2Toolkit, supplied with its MIT notice. The Toolkit driver itself remains a separate installation; the manager provides its official link. Other headsets do not need that driver.
+
+Use the Play shortcut to check for stable updates from Indurhra/dishonored-2-vr. Offline play uses the verified installed version. Verify / Repair restores missing or changed owned files from a local cache after backing up the current files. Settings and saves are preserved. No global OpenXR runtime, SteamVR profile or CPU affinity setting is changed.
+
+Upgrade from the older manager using the new Setup executable once. Its old schema deliberately cannot accept this expanded payload. Later compatible 0.7.x payload updates use the new manager's normal update path.

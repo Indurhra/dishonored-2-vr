@@ -1,4 +1,4 @@
-> This is an unofficial fork of **The Cosmic Tangerine’s [Dishonored 2 VR mod](https://github.com/thecosmictangerine-cloud/dishonored-2-vr)**. Original mod by **The Cosmic Tangerine**; additional modifications and installer maintained by **Indurhra**.
+> This is an unofficial fork of **The Cosmic Tangerine’s [Dishonored 2 VR mod](https://github.com/thecosmictangerine-cloud/dishonored-2-vr)**. Original mod by **The Cosmic Tangerine**; additional modifications and installer maintained by **Indurhra**. Credits to both The Cosmic Tangerine for his work with the current Dishonored 2 build and VR Stereo Hub for their work with Dishonored 1 VR.
 
 > **Indurhra development fork:** Contains the controller weapon wheel, hand calibration,
 > controller-operated VR menu, rendering diagnostics/fixes, story Heart repair, and
@@ -21,7 +21,7 @@ controllers. Free, open source, unofficial.
 - **Cutscenes play around you** (look anywhere; hold A or X to skip); takedowns, climbing and sliding keep the view on
   your head so they stay comfortable.
 
-> Status: **0.5.0, beta** (it replaces 1.0.0, which was numbered too early). Developed and played on a Meta Quest 3 (Link / Air Link). Other headsets and runtimes are expected to
+> Status: **0.7.0, beta** (it replaces 1.0.0, which was numbered too early). Developed and played on a Meta Quest 3 (Link / Air Link). Other headsets and runtimes are expected to
 > work but are less tested: see [docs/STATUS.md](docs/STATUS.md) for what is verified, and the known issues.
 
 ## Controller controls
@@ -34,22 +34,28 @@ See the **[controller guide](docs/CONTROLS.md)** for the full default layout, PS
 
 These describe the current fork’s default layout; preserved settings and custom bindings may differ.
 
-## Install
+## Install — all-in-one setup
 
-1. Download `DishonoredVR-<version>.zip` from the [Releases](../../releases) page.
-2. In Steam: right-click Dishonored 2 > Manage > Browse local files (the folder with `Dishonored2.exe`).
-3. Copy `dinput8.dll`, `DishonoredVR.dll` and `DishonoredVR.ini` into that folder.
-4. Set the game to **windowed** mode, start it from Steam, put the headset on.
+Download **[DishonoredVR-Setup-0.7.0.exe](https://github.com/Indurhra/dishonored-2-vr/releases/download/v0.7.0/DishonoredVR-Setup-0.7.0.exe)** from [Releases](https://github.com/Indurhra/dishonored-2-vr/releases).
 
-The zip's `README.txt` has everything for players: setup, the controls, the settings and troubleshooting. To
-uninstall, delete the three files.
+1. Close Dishonored 2 and run Setup. It discovers Steam libraries and checks the supported executable.
+2. Choose your headset. The offline installer includes the mod, **tested AFW and DLSS runtimes**, wheel artwork and the PSVR2 helper. No manual DLL copying is required.
+3. New installations default to **AFW + DLSS Quality**, requiring compatible NVIDIA RTX hardware. Untick that setup option for Native Stereo. Existing settings and renderer choices are preserved exactly.
+4. Use **Play Dishonored 2 VR** from the Start menu. The launcher checks for stable GitHub updates, verifies installed files, then launches through Steam. Use **Verify / Repair** to restore missing or changed files from the local cache; current files are backed up and saves/settings are kept.
+
+The installer works offline. Optional update checks need internet. The PSVR2 Toolkit driver remains a separate official installation for adaptive triggers; the helper/loader is bundled. No system runtime, SteamVR profiles or CPU settings are changed. The setup executable is unsigned, so Windows may show a reputation prompt.
+
+Users of the 0.6.0 manager must run the new Setup once: the expanded payload uses schema 2. Later compatible updates use the normal launcher update path. Launching directly from Steam bypasses these checks. Uninstall through Windows Apps or use the manager's rollback function.
+
+This release includes the accepted CPU, frame-pacing, resource-reuse and AFW recovery work. It does **not** promise stable 90 FPS in every scene. The removed submission diagnostic and rejected rendering experiments are not enabled. See the [release notes](docs/RELEASE-0.7.0.md) and [performance reference](docs/PERFORMANCE-REFERENCE.md).
 
 ### Requirements
 
 | | |
 |---|---|
 | Game | **Dishonored 2 on Steam**, current build (1.77.9.0). Not GOG, not Microsoft Store / Game Pass, not *Death of the Outsider* (the mod detects them and stays off). |
-| OS | Windows 10 or 11, 64-bit. Nothing else to install. |
+| OS | Windows 10 or 11, 64-bit. |
+| AFW / DLSS | Compatible NVIDIA RTX GPU and driver; tested runtime DLLs are bundled. Native Stereo is available separately. |
 | Headset | Any PC VR headset with an OpenXR runtime. Tested: Meta Quest 3 over Link / Air Link. Expected to work: other Quests, Virtual Desktop, SteamVR headsets (see [STATUS](docs/STATUS.md)). |
 | Display mode | Windowed (not fullscreen or borderless). |
 
@@ -104,4 +110,4 @@ Detours, {fmt}, Dear ImGui, the OpenXR SDK loader, JsonCpp) is listed with its l
 in every release zip.
 
 Dishonored 2 is a trademark of ZeniMax Media / Bethesda Softworks, developed by Arkane Studios. This project is not
-affiliated with or endorsed by them, and contains no game files or game code.
+affiliated with or endorsed by them, and does not include the game executable, levels or saves. The bundled wheel artwork remains Arkane/Bethesda/ZeniMax material; the AFW and DLSS binaries retain their separate third-party terms and credits.

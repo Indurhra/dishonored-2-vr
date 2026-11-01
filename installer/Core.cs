@@ -73,12 +73,19 @@ namespace DvrInstaller {
  }
  public class Package : IDisposable {
   public Manifest Manifest; public Dictionary<string,byte[]> Files=new Dictionary<string,byte[]>(StringComparer.OrdinalIgnoreCase);
-  public static readonly HashSet<string> Allowed=new HashSet<string>(new[]{"dinput8.dll","DishonoredVR.dll","DishonoredVR.ini","DVR_psvr2/dvr_psvr2_bridge.exe","DVR_psvr2/psvr2_toolkit_capi_loader.dll","DVR_psvr2/PSVR2Toolkit-LICENSE.txt","DVR_Docs/LICENSE.txt","DVR_Docs/THIRD-PARTY-NOTICES.txt","DVR_Docs/README.txt"},StringComparer.OrdinalIgnoreCase);
+  public static readonly HashSet<string> Allowed=new HashSet<string>(new[]{"dinput8.dll","DishonoredVR.dll","DishonoredVR.ini","DVR_psvr2/dvr_psvr2_bridge.exe","DVR_psvr2/psvr2_toolkit_capi_loader.dll","DVR_psvr2/PSVR2Toolkit-LICENSE.txt","DVR_Docs/LICENSE.txt","DVR_Docs/THIRD-PARTY-NOTICES.txt","DVR_Docs/README.txt","DVR_Docs/PERFORMANCE.md","DVR_Docs/DEPENDENCIES.txt","DVR_steamvr_frame_dispatch.txt","PDAFWPlugin.dll","nvngx_dlss.dll","DVR_Docs/NVIDIA-LICENSE.txt","DVR_Docs/AFW-NOTICE.txt"},StringComparer.OrdinalIgnoreCase);
+  static Package() {
+   foreach(int id in new[]{29,31,33,36,38,40,42,45,47,49,51,53,55,57,61,63,65,67,69,71,73,75,77,79,81,86,89,119,121,124})Allowed.Add("DVR_assets/wheel/lib_wheel/lib_wheel_id"+id.ToString("000")+".png");
+   foreach(int id in new[]{46,49,52,55,58,64,67,70,73,76,94,113,121})Allowed.Add("DVR_assets/wheel/quick_access_wheel/quick_access_wheel_id"+id.ToString("000")+".png");
+   Managed.UnionWith(Allowed);
+  }
+  public static readonly HashSet<string> Managed=new HashSet<string>(Allowed,StringComparer.OrdinalIgnoreCase);
   public Package(string path) {
    using(var zip=ZipFile.OpenRead(path)) {
     if(zip.Entries.Count!=Allowed.Count+1)throw new Exception("Package has missing or unexpected files.");
-    var names=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var names=new HashSet<string>(StringComparer.OrdinalIgnoreCase);long total=0;
     foreach(var e in zip.Entries) {
+     total+=e.Length;if(total>192L*1024*1024)throw new Exception("Package is too large.");
      string name=e.FullName.Replace('\\','/');
      if(!names.Add(name) || (name!="manifest.json" && !Allowed.Contains(name)) || e.Length>64*1024*1024)throw new Exception("Invalid package entry: "+name);
      using(var stream=e.Open())using(var memory=new MemoryStream()){stream.CopyTo(memory);Files[name]=memory.ToArray();}
@@ -87,7 +94,7 @@ namespace DvrInstaller {
    if(!Files.ContainsKey("manifest.json"))throw new Exception("Missing manifest.");
    Manifest=Data.Json.Deserialize<Manifest>(System.Text.Encoding.UTF8.GetString(Files["manifest.json"]));Files.Remove("manifest.json");
    Version parsed;
-   if(Manifest.Schema!=1 || !Version.TryParse(Manifest.Version,out parsed) || Manifest.Files==null || Manifest.Files.Length!=Allowed.Count)throw new Exception("Unsupported package version/schema.");
+   if(Manifest.Schema!=2 || !Version.TryParse(Manifest.Version,out parsed) || Manifest.Files==null || Manifest.Files.Length!=Allowed.Count)throw new Exception("Unsupported package version/schema.");
    var checkedNames=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
    foreach(var e in Manifest.Files)if(e==null || !checkedNames.Add(e.Path) || !Allowed.Contains(e.Path) || !Files.ContainsKey(e.Path) || Data.Hash(Files[e.Path])!=e.Sha256)throw new Exception("Package integrity check failed.");
   }
@@ -107,7 +114,7 @@ namespace DvrInstaller {
    for(string d=Path.GetFullPath(p);!String.IsNullOrEmpty(d);d=Path.GetDirectoryName(d))
     if((File.Exists(d)||Directory.Exists(d)) && (File.GetAttributes(d)&FileAttributes.ReparsePoint)!=0)throw new Exception("Linked folders/files are not supported: "+d);
   }
-  string Target(string rel) {if(!Package.Allowed.Contains(rel))throw new Exception("Unexpected managed path.");var p=Path.Combine(root,rel.Replace('/','\\'));Safe(p);return p;}
+  string Target(string rel) {if(!Package.Managed.Contains(rel))throw new Exception("Unexpected managed path.");var p=Path.Combine(root,rel.Replace('/','\\'));Safe(p);return p;}
   string Internal(string rel) {var p=Path.Combine(meta,rel);Safe(p);return p;}
   string Blob(string hash) {if(!Regex.IsMatch(hash??"","^[a-f0-9]{64}$"))throw new Exception("Invalid backup hash.");return Internal("blobs\\"+hash);}
   void Backup(string p,string hash) {var blob=Blob(hash);if(!File.Exists(blob))Data.Atomic(blob,File.ReadAllBytes(p));if(Data.HashFile(blob)!=hash)throw new Exception("Backup checksum mismatch.");}
@@ -130,12 +137,12 @@ namespace DvrInstaller {
   void Recover() {var p=Internal("pending.json");if(File.Exists(p)){Restore(Data.Load<Journal>(p));File.Delete(p);}}
   void Transaction(Action action) {
    var j=new Journal();
-   foreach(var rel in Package.Allowed.Concat(new[]{"@state"})) {string p=rel=="@state"?Internal("state.json"):Target(rel);string hash=File.Exists(p)?Data.HashFile(p):null;if(hash!=null)Backup(p,hash);j.Files.Add(new Snapshot{Path=rel,Hash=hash});}
+   foreach(var rel in Package.Managed.Concat(new[]{"@state"})) {string p=rel=="@state"?Internal("state.json"):Target(rel);string hash=File.Exists(p)?Data.HashFile(p):null;if(hash!=null)Backup(p,hash);j.Files.Add(new Snapshot{Path=rel,Hash=hash});}
    Data.Save(Internal("pending.json"),j);
    try {action();Data.Save(Internal("rollback.json"),j);File.Delete(Internal("pending.json"));}
    catch {Restore(j);File.Delete(Internal("pending.json"));throw;}
   }
-  public void Install(Package package,string headset="auto") {
+  public void Install(Package package,string headset="auto",bool afw=true) {
    Check();using(Lock()){Recover();var before=ReadState();
     if(before!=null && new Version(package.Manifest.Version)<new Version(before.Version))throw new Exception("Older package refused. Use Roll back instead.");
     foreach(var old in before==null?new List<Owned>():before.Files)if(old.Path!="DishonoredVR.ini") {var path=Target(old.Path);if(File.Exists(path)&&Data.HashFile(path)!=old.InstalledHash)throw new Exception("Managed file changed outside this installer: "+old.Path+". Preserve it before updating.");}
@@ -147,12 +154,34 @@ namespace DvrInstaller {
       if(prior==null&&original!=null)Backup(p,original);
       byte[] content=package.Files[entry.Path];
       if(entry.Path=="DishonoredVR.ini")content=System.Text.Encoding.UTF8.GetBytes(System.Text.Encoding.UTF8.GetString(content).Replace("[Gameplay]","[Gameplay]\r\n; Installer headset preference (runtime still verifies PSVR2).\r\nPsvr2Triggers = "+(headset=="other"?"0":"1")));
-      Data.Atomic(p,content);after.Files.Add(new Owned{Path=entry.Path,InstalledHash=Data.Hash(content),OriginalHash=original});
+      if(entry.Path=="DishonoredVR.ini"&&!afw)content=System.Text.Encoding.UTF8.GetBytes(System.Text.Encoding.UTF8.GetString(content).Replace("Renderer = 2","Renderer = 0"));
+      Data.Atomic(p,content);Backup(p,Data.Hash(content));after.Files.Add(new Owned{Path=entry.Path,InstalledHash=Data.Hash(content),OriginalHash=original});
       if(fault!=null)fault(++n);
      }
+     // Read back every installed binary before committing the transaction.
+     foreach(var owned in after.Files)if(owned.Path!="DishonoredVR.ini"&&Data.HashFile(Target(owned.Path))!=owned.InstalledHash)throw new Exception("Installed file verification failed: "+owned.Path);
      Data.Save(Internal("state.json"),after);
     });
    }
+  }
+  public void Verify(bool forLaunch=false) {
+   Check();using(Lock()){Recover();var state=ReadState();if(state==null)throw new Exception("Install the mod first.");
+    foreach(string name in Package.Allowed){string path=Target(name);if(!File.Exists(path))throw new Exception("Missing installed file: "+name+". Use Verify / Repair.");if(name=="DishonoredVR.ini")continue;
+     var owned=state.Files.Find(x=>x.Path.Equals(name,StringComparison.OrdinalIgnoreCase));if(owned==null||Data.HashFile(path)!=owned.InstalledHash)throw new Exception("Changed or untracked mod file: "+name+". Reinstall after preserving the changed file.");}
+    foreach(var owned in state.Files)if(owned.Path!="DishonoredVR.ini"&&(!File.Exists(Target(owned.Path))||Data.HashFile(Target(owned.Path))!=owned.InstalledHash))throw new Exception("Missing or changed file: "+owned.Path);
+    if(forLaunch){foreach(string name in new[]{"DVR_usemock.txt","DVR_mockpad.txt","DVR_MockHmd.txt","DVR_MockInput.txt"})if(File.Exists(Path.Combine(root,name)))throw new Exception("Simulator marker found: "+name+". Remove the test override before headset play.");
+     if(Directory.GetFiles(root,"DVR_cmd_*.txt").Length!=0)throw new Exception("Pending developer command files found. Remove them before launching through the manager.");
+     int renderer=Dependencies.Renderer(root);if(renderer>=1&&renderer<=5){var errors=Dependencies.Problems(root,state);if(errors.Count!=0)throw new Exception("AFW setup is incomplete: "+String.Join(", ",errors)+". Use Verify / Repair.");}}
+   }
+  }
+  public void Repair() {
+   Check();using(Lock()){Recover();var state=ReadState();if(state==null)throw new Exception("Install the mod first.");
+    foreach(string name in Package.Allowed.Where(x=>x!="DishonoredVR.ini"))if(!state.Files.Any(x=>x.Path.Equals(name,StringComparison.OrdinalIgnoreCase)))throw new Exception("Installation record is incomplete. Run the current installer again.");
+    var missing=state.Files.Where(x=>x.Path!="DishonoredVR.ini"&&(!File.Exists(Target(x.Path))||Data.HashFile(Target(x.Path))!=x.InstalledHash)).ToArray();
+    foreach(var owned in missing){string b=Blob(owned.InstalledHash);if(!File.Exists(b)||Data.HashFile(b)!=owned.InstalledHash)throw new Exception("Repair copy is unavailable. Run the matching installer again.");}
+    if(!File.Exists(Target("DishonoredVR.ini")))throw new Exception("Settings file missing. Run the installer to create defaults.");
+    if(missing.Length!=0)Transaction(()=>{foreach(var owned in missing)Data.Atomic(Target(owned.Path),File.ReadAllBytes(Blob(owned.InstalledHash)));});
+   }Verify();
   }
   public void Uninstall() {
    Check();using(Lock()){Recover();var before=ReadState();if(before==null)return;

@@ -3,6 +3,8 @@
 #include "RenderRes.h"
 #ifdef DVR_HAS_PDAFW
 #include "AfwLive.h"
+#include "AfwRecovery.h"
+#include "PlayerState.h"
 #include <wrl/client.h>
 #endif
 #include "pch.h"
@@ -29,6 +31,9 @@
 namespace
 {
     XRSession g_Session;
+#ifdef DVR_HAS_PDAFW
+    AfwRecovery g_AfwRecovery;
+#endif
     bool g_InitAttempted = false;
     std::atomic<float> g_FovH{ 90.f }, g_FovV{ 0.f };  //!< 0 = derive from aspect
     std::mutex g_CapMutex;
@@ -354,6 +359,18 @@ void VRRuntime::OnPresent(IDXGISwapChain* sc)
         }
     }
 
+#ifdef DVR_HAS_PDAFW
+    // Recover only in settled gameplay; do not consume retries on loading/menu or
+    // scripted mantle/takedown frames that temporarily changed the render path.
+    const bool retryReady=g_Session.IsSessionRunning()&&StereoSync::PairWanted()&&!ScreenMode::FlatRender()&&!Overlay::Visible()&&!PlayerState::AnimActiveNow();
+    if(g_AfwRecovery.Take(NowS(),retryReady)){
+        const int q=g_AfwRecovery.quality;const float scales[]={0,2.f/3.f,.58f,.5f,1.f/3.f};
+        LOGI("AFW automatic recovery attempt {}: restoring quality {} after transient input loss",g_AfwRecovery.attempts,q);
+        AfwLive::Enable(true);RenderRes::SetTemporalScale(scales[q]);DlssLive::SetQuality(q);DlssLive::SetEnabled(true);
+        StereoTaa::OnStereoChange(true);StereoSync::SetActive(false);g_Stereo=true;
+        g_FellBack=false;g_GateOpenSince=0;g_LastPairT=NowS();
+    }
+#endif
     if (g_Session.IsInitialized() && bb)
     {
         g_Session.PollEvents();
@@ -544,9 +561,12 @@ void VRRuntime::OnPresent(IDXGISwapChain* sc)
                             ID3D11Texture2D* images[2];images[fresh.eye]=bb;images[fresh.eye^1]=reconstructed;
                             for(int i=0;i<2;++i){memcpy(poses[i],p[i].quat,16);memcpy(poses[i]+4,p[i].pos,12);}
                             const bool accepted=g_Session.SubmitReconstructedPair(images[0],images[1],poses[0],poses[1],p[0].tan,p[1].tan,p[0].warp,p[1].warp);
-                            AfwLive::Submitted(accepted);submittedAfw=true;afwMiss=0;
+                            AfwLive::Submitted(accepted);if(accepted)g_AfwRecovery.Accepted();submittedAfw=true;afwMiss=0;
                         } else if(++afwMiss>=12) {
-                            LOGI("AFW returning to native stereo: {} | {}",AfwLive::Status(),DlssLive::Status());AfwLive::Fallback();DlssLive::SetEnabled(false);RenderRes::SetTemporalScale(0);StereoSync::SetActive(true);g_Stereo=false;afwMiss=0;
+                            LOGI("AFW returning to native stereo: {} | {}",AfwLive::Status(),DlssLive::Status());
+                            const bool retry=g_AfwRecovery.Schedule(NowS(),DlssLive::Quality(),AfwLive::TransientFailure());
+                            if(retry)LOGI("AFW recovery scheduled after transient input loss; waiting for settled gameplay");
+                            AfwLive::Fallback();DlssLive::SetEnabled(false);RenderRes::SetTemporalScale(0);StereoSync::SetActive(true);g_Stereo=false;afwMiss=0;
                         }
                     } else afwMiss=0;
                     if(!submittedAfw)
@@ -715,7 +735,11 @@ std::string VRRuntime::PredictStatus()
     return s;
 }
 void VRRuntime::SetPhaseOffset(int d) { std::lock_guard lk(g_StatusMutex); g_PhaseOffset = d; LOGI("cmd vr phaseoffset {} (test: the frame-order rule shifted by that many views)", d); }
-void VRRuntime::NoteStereoCommand() { g_FellBack = false; g_Backoff = 10; g_GateOpenSince = 0; g_LastPairT = 0; g_StableSince = 0; }
+void VRRuntime::NoteStereoCommand() {
+#ifdef DVR_HAS_PDAFW
+g_AfwRecovery.Cancel();
+#endif
+ g_FellBack = false; g_Backoff = 10; g_GateOpenSince = 0; g_LastPairT = 0; g_StableSince = 0; }
 int VRRuntime::PresentedEye() { return g_PresentedEye.load(); }
 void VRRuntime::SetStereo(bool on) { g_Stereo = on; }
 bool VRRuntime::Stereo() { return g_Stereo.load() || StereoSync::Active(); }   // either kind of stereo

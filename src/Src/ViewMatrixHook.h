@@ -68,6 +68,7 @@ namespace ViewMatrixHook
     //! of the newest view built with that matrix (either storage order), 0 = none of the last 16.
     unsigned long long SerialOfViewMatrix(const float m[16]);
     unsigned long long LatestSerial();
+    void SetFastRenderView(bool on);
     //! The latest main view's origin, the GAME eye it was composed from (before the HMD offset, the pivot fix and the
     //! takedown view) and the XR position of the head/eye pose used. viewOrg - gameOrg is the composition's offset:
     //! added to the game eye of a LATER frame it says where that frame will be rendered from, which is how the game

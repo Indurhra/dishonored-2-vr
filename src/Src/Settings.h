@@ -8,6 +8,9 @@
 namespace Settings
 {
     bool SaveRenderer(int mode); // 0 native; 1 DLAA through 5 Ultra Performance; 6 mono; 7 AER
+    void InstallComfortHooks();
+    std::string ComfortStatus();
+    void ApplyComfort();                         //!< maintain selected VR blur controls
     void Load();                                  //!< InitThread, before anything asks for a setting
     std::vector<std::string> StartupCommands();   //!< run at the first Present (input layout, turning)
     std::vector<std::string> PackageCommands();   //!< run when the VR package switches on in a game

@@ -15,6 +15,7 @@ namespace Game
     constexpr uint32_t kPlayerViewOrigin = 0x300;     //!< idVec3 firstPersonViewOrigin
     constexpr uint32_t kPlayerViewAxis   = 0x30C;     //!< idMat3 firstPersonViewAxis (row-major, 9 floats)
 
+    void SetFastSingleton(bool enabled); // diagnostic rollback; guarded read is default
     void*  GameLocal();
     void*  LocalPlayer();
     //! Reads the first-person view origin (3) and axis (9, rows = forward/left/up in id Tech).

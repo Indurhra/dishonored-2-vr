@@ -1,4 +1,5 @@
 #include "FrameProfile.h"
+#include "PublishedSnapshot.h"
 #include "pch.h"
 #include "ViewMatrixHook.h"
 #include "StereoSync.h"
@@ -34,6 +35,9 @@ namespace
     // The main view as the renderer got it (see ViewMatrixHook::RenderView). Written on the render thread once per
     // frame, read from the D3D draw hooks on the recording threads, hence the mutex.
     std::mutex g_ViewM;
+    struct RenderSnapshot {float mat[16]{},org[3]{},axis[9]{},headAxis[9]{};unsigned long long serial=0;};
+    PublishedSnapshot<RenderSnapshot> g_RenderSnapshot;
+    std::atomic<bool> g_FastRenderView{false};
     float g_ViewMat[16] = {}, g_ViewOrg[3] = {}, g_ViewAxis[9] = {}, g_ViewHeadAxis[9] = {};
     float g_ViewGameOrg[3] = {}, g_ViewHmdPos[3] = {}; bool g_ViewHmdValid = false;   // the game eye a view was composed from, and the HMD pose used
 
@@ -215,6 +219,10 @@ namespace
         geo.serial = g_ViewSerial; memcpy(geo.mat, out, 64); memcpy(geo.org, org, 12); memcpy(geo.axis, axis, 36); memcpy(geo.headAxis, headAxis ? headAxis : axis, 36);
         ViewSet& vs = g_SetRing[g_ViewSerial % 16];
         vs.serial = ps ? g_ViewSerial : 0; if (ps) vs.set = *ps;
+        RenderSnapshot snapshot;
+        memcpy(snapshot.mat,g_ViewMat,64);memcpy(snapshot.org,g_ViewOrg,12);
+        memcpy(snapshot.axis,g_ViewAxis,36);memcpy(snapshot.headAxis,g_ViewHeadAxis,36);snapshot.serial=g_ViewSerial;
+        g_RenderSnapshot.Publish(snapshot);
         PipeTrace::Event(PipeTrace::View, g_ViewSerial, (uint64_t)(int64_t)p.eye);
         return g_ViewSerial;
     }
@@ -857,6 +865,15 @@ int ViewMatrixHook::NextViewEye()
 unsigned long long ViewMatrixHook::LatestSerial() { std::lock_guard lk(g_ViewM); return g_ViewSerial; }
 bool ViewMatrixHook::RenderView(float mat[16], float org[3], float axis[9], unsigned long long* serial, float* headAxis)
 {
+    if(g_FastRenderView.load(std::memory_order_relaxed)) {
+        thread_local PublishedSnapshot<RenderSnapshot>::Reader reader;
+        if(!g_RenderSnapshot.Read(reader))return false;
+        const auto& view=reader.value;
+        memcpy(mat,view.mat,64);memcpy(org,view.org,12);memcpy(axis,view.axis,36);
+        if(headAxis)memcpy(headAxis,view.headAxis,36);
+        if(serial)*serial=view.serial;
+        return true;
+    }
     std::lock_guard lk(g_ViewM);
     if (!g_ViewSerial) return false;
     memcpy(mat, g_ViewMat, 64); memcpy(org, g_ViewOrg, 12); memcpy(axis, g_ViewAxis, 36);
@@ -864,3 +881,5 @@ bool ViewMatrixHook::RenderView(float mat[16], float org[3], float axis[9], unsi
     if (serial) *serial = g_ViewSerial;
     return true;
 }
+
+void ViewMatrixHook::SetFastRenderView(bool on){g_FastRenderView.store(on,std::memory_order_relaxed);}

@@ -37,6 +37,38 @@
 #include "SysInfo.h"
 #include "Version.h"
 
+
+#include <detours/detours.h>
+namespace {
+struct AudioThreadSettings { int priority; unsigned affinity; unsigned stackSize; };
+using AudioWorkerInit = int (*)(void*, const AudioThreadSettings*);
+AudioWorkerInit realAudioWorkerInit = nullptr;
+int InitAudioWorker(void* worker, const AudioThreadSettings* settings) {
+    if (!settings) return realAudioWorkerInit(worker, settings);
+    auto effective = *settings;
+    DWORD_PTR processMask=0, systemMask=0;
+    if (effective.affinity && GetProcessAffinityMask(GetCurrentProcess(), &processMask, &systemMask)) {
+        // Wwise's 32-bit all-CPU mask is invalid when the process is restricted.
+        // Zero means inherit the process mask, including CPUs above bit 31.
+        effective.affinity &= static_cast<unsigned>(processMask);
+        if (effective.affinity != settings->affinity)
+            LOGI("Audio startup: worker affinity {:X} -> {:X} (allowed {:X})", settings->affinity, effective.affinity, processMask);
+    }
+    return realAudioWorkerInit(worker, &effective);
+}
+void InstallAudioWorkerFix() {
+    const auto target=GameInfo::Base()+0x10c6940;
+    const unsigned char expected[]={0x48,0x89,0x5c,0x24,0x10,0x48,0x89,0x74,0x24,0x18};
+    if (memcmp(reinterpret_cast<const void*>(target),expected,sizeof expected)!=0) {
+        LOGI("Audio startup: worker signature mismatch; fix not installed"); return;
+    }
+    realAudioWorkerInit=reinterpret_cast<AudioWorkerInit>(target);
+    DetourTransactionBegin(); DetourUpdateThread(GetCurrentThread());
+    DetourAttach(reinterpret_cast<PVOID*>(&realAudioWorkerInit),InitAudioWorker);
+    LOGI("Audio startup: process-affinity compatibility hook {}",DetourTransactionCommit());
+}
+}
+
 static void OnPresent(IDXGISwapChain* sc)
 { DVR_PROFILE("Main.OnPresent");
     if(FrameProfile::active){ID3D11Device* d=nullptr;if(SUCCEEDED(sc->GetDevice(__uuidof(ID3D11Device),(void**)&d))){FrameProfile::Memory(d);d->Release();}}
@@ -111,6 +143,7 @@ static DWORD WINAPI InitThread(LPVOID)
         if (HANDLE h = CreateThread(nullptr, 0, UnsupportedBox, nullptr, 0, nullptr)) CloseHandle(h);
         return 0;
     }
+    InstallAudioWorkerFix();
     Settings::Load();
     LOGI("settings: {}", Settings::Summary());
     Watchdog::Install();          // a render thread that stops presenting is reported with where it is
@@ -151,11 +184,18 @@ static DWORD WINAPI InitThread(LPVOID)
     PlayerViewHook::SetEnabled(false);   // the local player never goes through that builder
     ViewMatrixHook::Install();
     LiveWheel::Install();
+    Settings::InstallComfortHooks();
     StereoSync::Install();           // the game's frame: held on every second frame for synchronised stereo
     XInputHook::Install();
-    XInputHook::SetEnabled(false);       // pad emulation reaches the engine's event queue but not the player yet (see ENGINE.md)
+    // Explicit simulator-only harness mode: advertise the pad on the FIRST probe.
+    // Enabling it later cannot revive a slot the game already marked disconnected.
+    // Disable global keyboard/mouse injection while this background harness is active.
+    const bool mockPad = !ReadOneLine(L"DVR_usemock.txt").empty() && ReadOneLine(L"DVR_mockpad.txt") == "1";
+    XInputHook::SetEnabled(mockPad);
     PadProbe::Install();
-    KbmInject::SetEnabled(true);
+    KbmInject::SetEnabled(!mockPad);
+    KbmInject::SetSimulatorMode(mockPad);
+    if (mockPad) LOGI("Simulator harness: native pad enabled from startup; global keyboard/mouse injection disabled");
     HandAimHook::Install();
     GunRay::Install();               // guns/crossbow: sensor, aim point, muzzle and reticle on the drawn weapon's ray
     MeleeAim::Install();             // the sword strikes along the right controller (only active with vr hand 2)

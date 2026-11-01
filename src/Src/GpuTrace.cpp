@@ -1,5 +1,7 @@
 #include "SceneFoveation.h"
 #include "FrameProfile.h"
+#include "ShaderHashCache.h"
+#include "DrawCpuCache.h"
 #include "pch.h"
 #include "ArmCalibration.h"
 #include "ArmHandback.h"
@@ -37,6 +39,8 @@
 
 namespace
 {
+    // Individually switchable for matched A/B captures; no settings or headset changes.
+    std::atomic<unsigned> g_CpuFast{16}; // measured transform-readiness optimization; other candidates stay off
     std::mutex g_M;
     // (vertex shader, index count) -> how many times it was drawn this frame. The vertex shader alone is too
     // coarse (one skinning shader draws every character) and the index count alone collides across meshes.
@@ -113,6 +117,7 @@ namespace
     std::atomic<bool> g_WantShader{ false };
     void* g_CapturedVS = nullptr;   // vertex shader of a target draw, disassembled at the next Present
     std::mutex g_ShaderM;
+    std::atomic<uint64_t> g_ShaderHashGeneration{1};
     std::map<void*, std::vector<uint8_t>> g_ShaderCode;   // bytecode kept from CreateVertexShader
     size_t g_ShaderBytes = 0;                             // what that costs (under g_ShaderM); level loads add to it
     std::set<void*> g_ShaderDumped;                       // so repeated requests walk to a new shader
@@ -344,13 +349,14 @@ namespace
     //! node through a dangling pointer.
     const InstLayout* LayoutFor(void* vs)
     {
-        constexpr int kFast = 8;
+        constexpr int kFast = 64;
         static thread_local void* fastVs[kFast] = {};
         static thread_local InstLayout fastL[kFast];
         static thread_local unsigned long long fastGen = 0;
         const unsigned long long gen = g_LayoutGen.load(std::memory_order_relaxed);
         if (fastGen != gen) { for (int i = 0; i < kFast; i++) fastVs[i] = nullptr; fastGen = gen; }
-        const int slot = (int)((((uintptr_t)vs) >> 4) & (kFast - 1));
+        const int slots=(g_CpuFast.load(std::memory_order_relaxed)&1)?kFast:8;
+        const int slot = (int)((((uintptr_t)vs) >> 4) & (slots - 1));
         if (fastVs[slot] == vs) return &fastL[slot];
         {
             std::lock_guard lk(g_LayoutM);
@@ -426,7 +432,7 @@ namespace
     //! Split one MVP into (projection, rigid model->view pose). `r*` are its four rows: clip.i = dot(row_i, modelPos).
     //! Assumes only what every perspective frustum satisfies: last row (0,0,1,0), no x/y skew, no x/y clip offset.
     //! TAA jitter lives in p[0][2]/p[1][2] and is carried through untouched.
-    Factored Factor(const float* rx, const float* ry, const float* rz, const float* rw)
+    Factored FactorUncached(const float* rx, const float* ry, const float* rz, const float* rw)
     {
         Factored f;
         if (!Finite4(rx) || !Finite4(ry) || !Finite4(rz) || !Finite4(rw)) return f;   // NaN passes every compare: check first
@@ -461,6 +467,13 @@ namespace
         f.p[3][2] = 1.f;
         f.ok = std::isfinite(f.pose.t[0]) && std::isfinite(f.pose.t[1]) && f.resid < 0.01f;
         return f;
+    }
+
+    Factored Factor(const float* rx,const float* ry,const float* rz,const float* rw)
+    {
+        if(!(g_CpuFast.load(std::memory_order_relaxed)&2))return FactorUncached(rx,ry,rz,rw);
+        thread_local DrawRowsCache<Factored> cache;
+        return cache.Get(rx,ry,rz,rw,[&]{return FactorUncached(rx,ry,rz,rw);});
     }
 
     //! The inverse of Factor: the same projection, a new pose. Pose = identity delta reproduces the input exactly.
@@ -555,6 +568,8 @@ namespace
 
     std::mutex g_XfM;
     float g_XfControl = 1.f;                 // handback weight captured with this view
+    // Readiness witness only; transform data remains protected by g_XfM.
+    std::atomic<unsigned long long> g_ReadyXfSerial{0};
     unsigned long long g_XfSerial = 0;         // the view this cached transform belongs to
     unsigned long long g_XfPresent = 0;        // the Present frame it was taken in
     // Per hand, because both arms are within arm's reach of the eye and would otherwise both follow one controller.
@@ -1043,11 +1058,13 @@ namespace
     std::atomic<bool> g_HandsFromView{ true };
     std::atomic<unsigned long long> g_XfFromView{ 0 }, g_XfLatest{ 0 };
     bool EnsureTransform()
-    {
+    { DVR_PROFILE_DETAIL("GpuTrace.EnsureTransform");
         float vm[16], vorg[3], vaxis[9], haxis[9]; unsigned long long serial = 0;
         // (vaxis: the axis the view was rendered with -- the basis the MVPs live in; haxis: the head's, without a stereo
         // eye's turn or cant -- the yaw the controllers are carried into the world with, the same for both eyes)
         if (!ViewMatrixHook::RenderView(vm, vorg, vaxis, &serial, haxis)) { g_XfNoView++; return false; }
+        if ((g_CpuFast.load(std::memory_order_relaxed) & 16) && serial &&
+            g_ReadyXfSerial.load(std::memory_order_acquire) == serial) return true;
         { std::lock_guard lk(g_XfM); if (serial == g_XfSerial) return g_XfValid; }
 
         // The view basis the factorisation recovers: x = clip x = right, y = clip y = up, z = depth = forward.
@@ -1102,6 +1119,7 @@ namespace
 
         std::lock_guard lk(g_XfM);
         if (serial == g_XfSerial) return g_XfValid;              // another thread got here first
+        g_ReadyXfSerial.store(0, std::memory_order_release);
         if (g_XfValid) { for (int h = 0; h < 2; h++) g_DeltaViewPrev[h] = g_DeltaView[h]; g_XfPrevValid = true; }
         g_XfControl = g_ResumeWeight.load();
         g_XfSerial = serial; g_XfPresent = g_PresentFrame; g_ViewRigid = vw; g_ViewInv = Inv(vw); g_ViewValid = true;
@@ -1236,6 +1254,7 @@ namespace
         else g_DeltaEyeValid[0] = g_DeltaEyeValid[1] = false;
         g_XfPrevValid = true;
         g_XfValid = true;
+        g_ReadyXfSerial.store(serial, std::memory_order_release);
         return true;
     }
 
@@ -1317,7 +1336,7 @@ namespace
     }
     thread_local float t_DrawProj[4][4]; thread_local Rigid t_DrawProjView; thread_local bool t_DrawProjValid = false; thread_local unsigned long long t_DrawProjSerial = 0;
     bool TransformInstanceCb(ID3D11DeviceContext* ctx, const InstLayout* L, const float* in, UINT bytes, float* out, bool byIndex, UINT draw, ArmInfo* ai = nullptr)
-    {
+    { DVR_PROFILE_DETAIL("GpuTrace.TransformInstanceCb");
         t_DrawProjValid = false;
         if (!L || !L->ok) { g_NoLayout++; return false; }
         const bool byAnchor = g_IdMode.load() == 1;
@@ -3386,12 +3405,17 @@ namespace
     struct CtxSer { void* k = nullptr; unsigned long long s = 0; };
     std::mutex g_CtxSerM; CtxSer g_CtxSer[32]; CtxSer g_ListSer[64]; int g_ListNext = 0;
     std::atomic<unsigned long long> g_ExecSerial{ 0 }, g_ExecFrame{ 0 };
+    std::atomic<unsigned long long> g_CtxSerGeneration{1};
     void CtxSerialSet(void* ctx, unsigned long long s)
     {
+        thread_local DrawSerialWitness witness;
+        const bool fast=(g_CpuFast.load(std::memory_order_relaxed)&4)!=0;
+        if(fast&&witness.Matches(ctx,s,g_CtxSerGeneration.load(std::memory_order_acquire)))return;
         std::lock_guard lk(g_CtxSerM);
+        const auto generation=g_CtxSerGeneration.load(std::memory_order_relaxed);
         CtxSer* freeSlot = nullptr;
-        for (auto& e : g_CtxSer) { if (e.k == ctx) { if (s > e.s) e.s = s; return; } if (!e.k && !freeSlot) freeSlot = &e; }
-        if (freeSlot) { freeSlot->k = ctx; freeSlot->s = s; }
+        for (auto& e : g_CtxSer) { if (e.k == ctx) { if (s > e.s) e.s = s; witness.Published(ctx,s,generation); return; } if (!e.k && !freeSlot) freeSlot = &e; }
+        if (freeSlot) { freeSlot->k = ctx; freeSlot->s = s; witness.Published(ctx,s,generation); }
     }
     using FinishCL_t = HRESULT(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, BOOL, ID3D11CommandList**);
     using ExecCL_t = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, ID3D11CommandList*, BOOL);
@@ -3404,7 +3428,7 @@ namespace
         unsigned long long s = 0;
         {
             std::lock_guard lk(g_CtxSerM);
-            for (auto& e : g_CtxSer) if (e.k == c) { s = e.s; e.k = nullptr; e.s = 0; break; }
+            for (auto& e : g_CtxSer) if (e.k == c) { s = e.s; e.k = nullptr; e.s = 0; g_CtxSerGeneration.fetch_add(1,std::memory_order_release); break; }
             if (SUCCEEDED(hr) && pp && *pp && s) { g_ListSer[g_ListNext] = { *pp, s }; g_ListNext = (g_ListNext + 1) % 64; }
         }
         StereoTaa::OnFinishList(c, SUCCEEDED(hr) && pp ? *pp : nullptr);
@@ -3456,7 +3480,7 @@ namespace
     }
 
     void BeginSixDof(ID3D11DeviceContext* ctx, Swap& sw, bool byIndex, UINT draw, bool allowMove = true)
-    {
+    { DVR_PROFILE_DETAIL("GpuTrace.BeginSixDof");
         if (!g_PoolReady.load()) return;
         const bool xf = allowMove && SixDofOn() && EnsureTransform();
         const bool fixing = StereoTaa::FixingPrev();
@@ -4371,6 +4395,7 @@ namespace
                 const uint64_t h = DxbcHash(code, len);
                 g_VsHash[(void*)*out] = h;
                 g_PsCsHash.erase((void*)*out);
+                g_ShaderHashGeneration.fetch_add(1,std::memory_order_release);
                 // an address reused by another shader must not inherit the old one's skip
                 for (auto& p : g_SkipVsPtr) { void* e = (void*)*out; p.compare_exchange_strong(e, nullptr); }
                 for (auto& p : g_TrailVsPtr) { void* e = (void*)*out; p.compare_exchange_strong(e, nullptr); }
@@ -4397,6 +4422,7 @@ namespace
         g_ShaderBytes += len - slot.size();
         slot.assign((const uint8_t*)code, (const uint8_t*)code + len);
         g_PsCsHash[sh] = DxbcHash(code, len);
+        g_ShaderHashGeneration.fetch_add(1,std::memory_order_release);
         g_VsHash.erase(sh);                               // the address was a vertex shader before (a level load)
     }
     HRESULT STDMETHODCALLTYPE HkCreatePixelShader(ID3D11Device* dev, const void* code, SIZE_T len, ID3D11ClassLinkage* l, ID3D11PixelShader** out)
@@ -4993,7 +5019,7 @@ void GpuTrace::SetSixDof(int mode)
 {
     g_SixDof = mode;
     if (mode) g_CalReq = true;
-    { std::lock_guard lk(g_XfM); g_XfSerial = 0; g_XfValid = false; g_XfPrevValid = false; }
+    { std::lock_guard lk(g_XfM); g_ReadyXfSerial.store(0, std::memory_order_release); g_XfSerial = 0; g_XfValid = false; g_XfPrevValid = false; }
     LOGI("gpu6dof: mode {} ({})", mode, mode == 0 ? "off" : mode == 1 ? "follow the controller" : "identity rebuild");
 }
 int  GpuTrace::SixDof() { return g_SixDof.load(); }
@@ -5178,20 +5204,36 @@ std::string GpuTrace::ShaderCache()
 {
     std::lock_guard lk(g_ShaderM);
     std::lock_guard lk2(g_LayoutM);
-    return fmt::format("{} shaders {} KB, {} layouts, gen {}",
-                       g_ShaderCode.size(), g_ShaderBytes / 1024, g_LayoutByVs.size(), g_LayoutGen.load());
+    return fmt::format("{} shaders {} KB, {} layouts, gen {} cpufast {}",
+                       g_ShaderCode.size(), g_ShaderBytes / 1024, g_LayoutByVs.size(), g_LayoutGen.load(),g_CpuFast.load());
 }
 
 size_t GpuTrace::ShaderCount() { std::lock_guard lk(g_ShaderM); return g_ShaderCode.size(); }
 uint64_t GpuTrace::ShaderHashOf(const void* sh)
 {
+    if(!sh)return 0;
+    thread_local ShaderHashCache cache;
+    uint64_t hash=0;
+    const auto generation=g_ShaderHashGeneration.load(std::memory_order_acquire);
+    if(cache.Find(sh,generation,hash))return hash;
     std::lock_guard lk(g_ShaderM);
-    if (auto it = g_VsHash.find((void*)sh); it != g_VsHash.end()) return it->second;
-    if (auto it = g_PsCsHash.find((void*)sh); it != g_PsCsHash.end()) return it->second;
-    return 0;
+    if(auto it=g_VsHash.find((void*)sh);it!=g_VsHash.end())hash=it->second;
+    else if(auto it=g_PsCsHash.find((void*)sh);it!=g_PsCsHash.end())hash=it->second;
+    cache.Store(sh,g_ShaderHashGeneration.load(std::memory_order_acquire),hash);
+    return hash;
 }
 uint64_t GpuTrace::VsHashOf(const void* vs)
-{ std::lock_guard lk(g_ShaderM); auto it = g_VsHash.find((void*)vs); return it == g_VsHash.end() ? 0 : it->second; }
+{
+    if(!vs)return 0;
+    thread_local ShaderHashCache cache;
+    uint64_t hash=0;
+    const auto generation=g_ShaderHashGeneration.load(std::memory_order_acquire);
+    if(cache.Find(vs,generation,hash))return hash;
+    std::lock_guard lk(g_ShaderM);
+    if(auto it=g_VsHash.find((void*)vs);it!=g_VsHash.end())hash=it->second;
+    cache.Store(vs,g_ShaderHashGeneration.load(std::memory_order_acquire),hash);
+    return hash;
+}
 
 std::string GpuTrace::SwapStats()
 { return fmt::format("tried {} done {} nobuf {} sizemismatch {} shadow {}", g_SwapTried.load(), g_SwapDone.load(), g_SwapNoBuf.load(), g_SwapSize.load(), g_ShadowValid ? 1 : 0); }
@@ -5681,4 +5723,10 @@ bool GpuTrace::HandPoseWorld(int hand, float org[3], float rot[9])
     if (!g_XfValid || !g_TargetValid[h]) return false;
     memcpy(org, g_HandPose[h].t, 12); memcpy(rot, g_HandPose[h].r, 36);
     return true;
+}
+
+void GpuTrace::SetCpuFast(unsigned mask) {
+    g_CpuFast.store(mask&31,std::memory_order_relaxed);
+    ViewMatrixHook::SetFastRenderView((mask&8)!=0);
+    LOGI("CPU fast mask {} (layout=1, exact matrix reuse=2, serial publication=4, view snapshot=8, transform readiness=16)",mask&31);
 }

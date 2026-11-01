@@ -7,6 +7,7 @@
 # into functions with them). The version is set in src\CMakeLists.txt; the commit is appended by the build.
 param([switch]$SkipBuild, [switch]$AllowDirty, [string]$RepoUrl = 'https://github.com/thecosmictangerine-cloud')
 $ErrorActionPreference = 'Stop'
+throw 'This legacy ZIP omits AFW, DLSS and wheel assets. Build the complete release with installer/build.ps1; see installer/README.md.'
 $repo = Split-Path $PSScriptRoot -Parent
 if (-not $SkipBuild) { & "$repo\scripts\build.ps1" | Out-Host }
 

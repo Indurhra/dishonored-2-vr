@@ -236,7 +236,11 @@ bool WristHud::MirrorBegin(ID3D11DeviceContext* ctx, int kind, Mirror& m)
     const bool lift = ScreenMode::LiftUi();
     if (!ours || !g_Capture.load() || !ctx || !(g_Wanted.load() || g_ShotWant.load() || lift)) return false;
     m.lift = lift;
-    LARGE_INTEGER t0; QueryPerformanceCounter(&t0);
+    // Sample diagnostic timing, not rendering: avoid two clock queries and a
+    // contended atomic addition on every scene draw. Report an estimate below.
+    thread_local unsigned timingSequence=0;
+    const bool timed=(++timingSequence % 64)==0;
+    LARGE_INTEGER t0{}; if(timed)QueryPerformanceCounter(&t0);
     g_Checked++;
     // Is the game drawing into the backbuffer? One view, its resource, compared.
     ID3D11RenderTargetView* rtv0 = nullptr;
@@ -251,7 +255,7 @@ bool WristHud::MirrorBegin(ID3D11DeviceContext* ctx, int kind, Mirror& m)
         if (res) res->Release();
         rtv0->Release();
     }
-    auto done = [&](bool r) { LARGE_INTEGER t1; QueryPerformanceCounter(&t1); g_CheckTicks += (unsigned long long)(t1.QuadPart - t0.QuadPart); return r; };
+    auto done = [&](bool r) { if(timed){ LARGE_INTEGER t1; QueryPerformanceCounter(&t1); g_CheckTicks.fetch_add(64ull * (unsigned long long)(t1.QuadPart - t0.QuadPart),std::memory_order_relaxed); } return r; };
     if (!bb) return done(false);
     // (it uses BOTH in one frame: measured, the interface alternates between sRGB and UNORM views of the typeless
     // backbuffer, draw by draw -- so the view is matched per draw)
@@ -407,7 +411,7 @@ void WristHud::EndPresent()
 
 std::string WristHud::Status()
 {
-    return fmt::format("hud capture {} tex {}x{} mirrored {} lifted {} (last frame {}) skip noPS {} noBlend {} mod {} checked {} checkus {:.0f} cinebars {} dropping {} dropped {} (last frame {})",
+    return fmt::format("hud capture {} tex {}x{} mirrored {} lifted {} (last frame {}) skip noPS {} noBlend {} mod {} checked {} checkusEstimate {:.0f} cinebars {} dropping {} dropped {} (last frame {})",
                        g_Capture.load() ? 1 : 0, g_TexW, g_TexH, g_Mirrored.load(), g_Lifted.load(), g_LastFrameMirrored, g_SkipNoPs.load(),
                        g_SkipNoBlend.load(), g_SkipOwn.load(), g_Checked.load(), g_LastCheckUs,
                        g_BarsMode.load(), g_DropBars.load() ? 1 : 0, g_BarsDropped.load(), g_BarsLastFrame.load());

@@ -93,6 +93,8 @@ namespace
         else if (what == "predictservo") { int m = 1; ss >> m; VRRuntime::SetPredictServo(m != 0); }
         else if (what == "predictmax") { float ms = 120.f; ss >> ms; VRRuntime::SetPredictMax(ms); }
         // the hands drawn from the poses their VIEW was built from (1, default) or from the latest located (0, before)
+        else if (what == "cpusingleton") { int m=0; if(ss >> m)Game::SetFastSingleton(m != 0); }
+        else if (what == "cpufast") { unsigned mask=0; if(ss >> mask)GpuTrace::SetCpuFast(mask); }
         else if (what == "handsfromview") { int m = 1; ss >> m; GpuTrace::SetHandsFromView(m != 0); }
         // eye phasing: 1 = the TAA's measured view wins over the frame-order rule (default), 0 = the rule only (before)
         else if (what == "phaseloop") { int m = 1; ss >> m; VRRuntime::SetPhaseClosed(m != 0); }
@@ -1298,6 +1300,7 @@ namespace
                 f << "\n";
             }
         }
+        f << Settings::ComfortStatus() << "\n";
         for (auto& e : CVars::Known()) f << "cvar " << e.name << " " << CVars::GetString(e.name) << "\n";
     }
 }
@@ -1318,6 +1321,7 @@ void Commands::OnPresent()
     if ((now.QuadPart - g_LastPoll.QuadPart) * 10 >= fq.QuadPart)
     {
         g_LastPoll = now;
+        Settings::ApplyComfort();
         // Legacy single file + sequence-numbered files (DVR_cmd_<n>.txt, processed in name order,
         // so rapid successive commands are never overwritten/reordered).
         std::vector<std::wstring> files;

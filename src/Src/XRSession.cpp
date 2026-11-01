@@ -9,6 +9,7 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 #include "XRSession.h"
+#include "GameInfo.h"
 #include "MetaAsw.h"
 #include "SysInfo.h"
 #include "Watchdog.h"
@@ -16,6 +17,23 @@
 #include <cmath>
 #include <chrono>
 #include <condition_variable>
+
+
+#include "FrameDispatch.h"
+
+namespace {
+FrameDispatch& SteamDispatcher(){
+    // Process lifetime: do not join a runtime worker under DllMain's loader lock.
+    static auto* dispatcher=[] { LOGI("SteamVR: allocation-free frame worker enabled; keep-alive lock owned by worker"); return new FrameDispatch; }();
+    return *dispatcher;
+}
+template<class F> XrResult SteamFrameCall(const std::string& runtime,F call){
+    static const bool enabled=GetEnvironmentVariableW(L"DVR_STEAMVR_FRAME_DISPATCH",nullptr,0)!=0 ||
+        GetFileAttributesW((GameInfo::GameDir()+L"\\DVR_steamvr_frame_dispatch.txt").c_str())!=INVALID_FILE_ATTRIBUTES;
+    if(!enabled||runtime.find("SteamVR")==std::string::npos)return call();
+    return static_cast<XrResult>(SteamDispatcher().Call(call));
+}
+}
 
 // Single OpenXR state block (only one session ever exists).
 namespace
@@ -1519,7 +1537,7 @@ bool XRSession::BeginFrame()
         g.frameState = { XR_TYPE_FRAME_STATE };
         XrFrameWaitInfo fwi = { XR_TYPE_FRAME_WAIT_INFO };
         XrResult wr;
-        { Watchdog::Mark mk("xrWaitFrame"); WaitTrace::Scope timing(WaitTrace::WaitFrame); wr = xrWaitFrame(g.session, &fwi, &g.frameState); }
+        { Watchdog::Mark mk("xrWaitFrame"); WaitTrace::Scope timing(WaitTrace::WaitFrame); wr = SteamFrameCall(m_RuntimeName, [&] { return xrWaitFrame(g.session, &fwi, &g.frameState); }); }
         if (XR_FAILED(wr))
             return false;
         recenterPending = m_RecenterPending; recenterAt = m_RecenterAt;
@@ -1527,7 +1545,7 @@ bool XRSession::BeginFrame()
 
     XrFrameBeginInfo fbi = { XR_TYPE_FRAME_BEGIN_INFO };
     XrResult r;
-    { Watchdog::Mark mk("xrBeginFrame"); WaitTrace::Scope timing(WaitTrace::BeginFrame); r = xrBeginFrame(g.session, &fbi); }
+    { Watchdog::Mark mk("xrBeginFrame"); WaitTrace::Scope timing(WaitTrace::BeginFrame); r = SteamFrameCall(m_RuntimeName, [&] { return xrBeginFrame(g.session, &fbi); }); }
     if (XR_FAILED(r))
     {
         FrameEnded();
@@ -2178,7 +2196,7 @@ void XRSession::EndFrameWithLayers(XrCompositionLayerProjection& layer)
     fei.layers = layers;
     SaveLayers(layers, haveWrist ? nLayers - 1 : nLayers);   // the keep-alive's copy (the watch, last, left out)
     XrResult er;
-    { Watchdog::Mark mk("xrEndFrame"); WaitTrace::Scope timing(WaitTrace::EndFrame); er = xrEndFrame(g.session, &fei); }
+    { Watchdog::Mark mk("xrEndFrame"); WaitTrace::Scope timing(WaitTrace::EndFrame); er = SteamFrameCall(m_RuntimeName, [&] { return xrEndFrame(g.session, &fei); }); }
     if (XR_FAILED(er) && m_EndFrameFails++ < 10)   // the runtime refused the frame: a black headset, said nowhere else
         LOGI("XRSession: xrEndFrame FAILED {} ({} layers{})", (int)er, nLayers, m_EndFrameFails == 10 ? "; not logged again" : "");
 
@@ -2510,7 +2528,7 @@ void XRSession::EndFrameNoRender()
     fei.layerCount = 0;
     fei.layers = nullptr;
     XrResult er;
-    { Watchdog::Mark mk("xrEndFrame"); WaitTrace::Scope timing(WaitTrace::EndFrame); er = xrEndFrame(g.session, &fei); }
+    { Watchdog::Mark mk("xrEndFrame"); WaitTrace::Scope timing(WaitTrace::EndFrame); er = SteamFrameCall(m_RuntimeName, [&] { return xrEndFrame(g.session, &fei); }); }
     if (XR_FAILED(er) && m_EndFrameFails++ < 10)
         LOGI("XRSession: xrEndFrame (no layers) FAILED {}{}", (int)er, m_EndFrameFails == 10 ? "; not logged again" : "");
     m_FrameStarted = false;
@@ -2593,20 +2611,23 @@ void XRSession::KeepAliveFrame(const void* fsIn)
         layers[n++] = (const XrCompositionLayerBaseHeader*)&proj;
         for (int q = 0; q < nQuads; q++) layers[n++] = (const XrCompositionLayerBaseHeader*)&quads[q];
     }
-    if (pump.mt) pump.mt->Enter();
-    XrFrameBeginInfo fbi = { XR_TYPE_FRAME_BEGIN_INFO };
-    XrResult r;
-    { Watchdog::Mark mk("xrBeginFrame (keep-alive)"); r = xrBeginFrame(g.session, &fbi); }
-    if (XR_SUCCEEDED(r))
-    {
-        XrFrameEndInfo fei = { XR_TYPE_FRAME_END_INFO };
-        fei.displayTime = fs.predictedDisplayTime;
-        fei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-        fei.layerCount = n;
-        fei.layers = n ? layers : nullptr;
-        { Watchdog::Mark mk("xrEndFrame (keep-alive)"); r = xrEndFrame(g.session, &fei); }
-    }
-    if (pump.mt) pump.mt->Leave();
+    // The runtime can take the immediate-context lock itself. Acquire our
+    // keep-alive guard on the SAME worker, never on a caller waiting for it.
+    const XrResult r=SteamFrameCall(m_RuntimeName,[&]{
+        if(pump.mt)pump.mt->Enter();
+        XrFrameBeginInfo fbi={XR_TYPE_FRAME_BEGIN_INFO};
+        XrResult result;
+        {Watchdog::Mark mk("xrBeginFrame (keep-alive)");result=xrBeginFrame(g.session,&fbi);}
+        if(XR_SUCCEEDED(result)){
+            XrFrameEndInfo fei={XR_TYPE_FRAME_END_INFO};
+            fei.displayTime=fs.predictedDisplayTime;
+            fei.environmentBlendMode=XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+            fei.layerCount=n;fei.layers=n?layers:nullptr;
+            {Watchdog::Mark mk("xrEndFrame (keep-alive)");result=xrEndFrame(g.session,&fei);}
+        }
+        if(pump.mt)pump.mt->Leave();
+        return result;
+    });
     std::lock_guard<std::mutex> lk(pump.m);
     pump.lastKeepAlive = NowSec();
     if (fs.predictedDisplayPeriod > 1000000 && fs.predictedDisplayPeriod < 100000000) pump.period = (double)fs.predictedDisplayPeriod * 1e-9;
@@ -2696,7 +2717,7 @@ void XRSession::PumpLoop()
             XrFrameWaitInfo wi = { XR_TYPE_FRAME_WAIT_INFO };
             const double t0 = NowSec();
             XrResult r;
-            { Watchdog::Mark mk("xrWaitFrame"); WaitTrace::Scope timing(WaitTrace::WaitFrame); r = xrWaitFrame(g.session, &wi, &st); }
+            { Watchdog::Mark mk("xrWaitFrame"); WaitTrace::Scope timing(WaitTrace::WaitFrame); r = SteamFrameCall(m_RuntimeName, [&] { return xrWaitFrame(g.session, &wi, &st); }); }
             const double t1 = NowSec(), took = t1 - t0;
             lk.lock();
             pump.waiting = false; pump.waits++;

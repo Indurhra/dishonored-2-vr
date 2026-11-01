@@ -63,7 +63,7 @@ PSVR2Toolkit `psvr2_toolkit_capi_loader.dll` and retain its bundled MIT license.
 For example, from the repository root:
 
 ```powershell
-pwsh installer/build.ps1 -Version 0.5.1 -ToolkitLoader C:\path\psvr2_toolkit_capi_loader.dll -InnoCompiler 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+pwsh installer/build.ps1 -Version 0.7.0 -ToolkitLoader C:\path\psvr2_toolkit_capi_loader.dll -AfwRuntime C:\path\PDAFWPlugin.dll -DlssRuntime C:\path\nvngx_dlss.dll -DlssLicense C:\path\NVIDIA-LICENSE.txt -WheelAssets C:\path\wheel -InnoCompiler 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
 ```
 
 Build output goes into a new `local/installer-VERSION` directory. The builder
@@ -74,7 +74,7 @@ No action publishes a release or changes the real game installation.
 
 ## Tests and transaction design
 
-Compile Core.cs, Updates.cs and Tests.cs as a separate console test executable,
+Compile Core.cs, Dependencies.cs, Updates.cs and Tests.cs as a separate console test executable,
 referencing System.Web.Extensions, System.IO.Compression and
 System.IO.Compression.FileSystem. Run it with a new isolated output directory.
 The shipped manager has no command-line compatibility bypass or fake-game mode.
@@ -101,3 +101,22 @@ and helper, preserved settings/save fixtures and removed its uninstall entry.
 The real installed game DLL hash remained unchanged. The 0.5.2 build was a test
 fixture, not a published release. Live download of an actual future release
 cannot be verified until one is published; no release was published for testing.
+
+## Complete 0.7.0 package
+
+Schema 2 includes the tested AFW and NVIDIA DLSS runtimes, all 43 wheel images,
+the PSVR2 helper/loader, licenses and the performance reference. Fresh installs
+select AFW + DLSS Quality unless the setup option is cleared; NVIDIA RTX is required
+for that renderer. Existing INI files remain byte-for-byte intact. The base game,
+saves and PSVR2 Toolkit driver are not included.
+
+Verify / Repair restores missing or changed managed files from verified local
+backups. Launch checks every installed file before starting Steam. Future stable
+payloads can replace the AFW/DLSS pair together: users receive tested versions,
+not arbitrary third-party nightly DLLs. Schema-1 managers need this setup once.
+
+The 0.7.0 tests extend the original suite with complete-payload, runtime integrity,
+offline repair, changed-file repair and dependency-update coverage. Actual runtime
+integration also checks fresh AFW/native choices, 43 wheel files, reinstall,
+uninstall and settings/save preservation. Real GPU tests cover AFW and DLSS
+recovery. The installer remains unsigned.
